@@ -6,11 +6,18 @@ extern "C" _declspec(dllexport) unsigned int NvOptimusEnablement = 0x00000001;
 #include <GL/glew.h>
 #include <cmath>
 #include <cstdlib>
+#include <stdlib.h>
 #include <algorithm>
 #include <chrono>
 
+#include <string>
+#include <fstream>
+#include <streambuf>
+#include <SDL.h>
+
 #include <labhelper.h>
 #include <imgui.h>
+#include "particles.h"
 
 #include <perf.h>
 
@@ -22,86 +29,201 @@ using namespace glm;
 #include "hdr.h"
 #include "fbo.h"
 
+#define XY(i,j) ((i)+(N*2)*(j))
+#define SIZE 124
+
+///////////////////////////////////////////////////////////////////////////////
+/*
+TODOLIST
+-Implement some draw_density type function
+-Check out "marker and cell" grid (MAC grid)
+-Extend solver to 3D
+-Check out and possibly implement "vorticity confinement" 
+-Somehow implement collision detection, so that smoke can "wrap" around objects (voxelize objects)
+*/
+
+
 
 ///////////////////////////////////////////////////////////////////////////////
 // Various globals
 ///////////////////////////////////////////////////////////////////////////////
 SDL_Window* g_window = nullptr;
+int windowWidth, windowHeight;
+float g_clearColor[3] = { 0.2f, 0.2f, 0.8f };
+
 float currentTime = 0.0f;
 float previousTime = 0.0f;
 float deltaTime = 0.0f;
-int windowWidth, windowHeight;
 
-// Mouse input
+//Mouse input
 ivec2 g_prevMouseCoords = { -1, -1 };
 bool g_isMouseDragging = false;
+
 
 ///////////////////////////////////////////////////////////////////////////////
 // Shader programs
 ///////////////////////////////////////////////////////////////////////////////
-GLuint shaderProgram;       // Shader for rendering the final image
-GLuint simpleShaderProgram; // Shader used to draw the shadow map
-GLuint backgroundProgram;
+GLuint shaderProgram; // Shader used to draw the shadow map
 
 ///////////////////////////////////////////////////////////////////////////////
-// Environment
+// Test globals
 ///////////////////////////////////////////////////////////////////////////////
-float environment_multiplier = 1.5f;
-GLuint environmentMap;
-const std::string envmap_base_name = "001";
+GLuint cubeVAO;
+GLuint positionBuffer;
+GLuint colorBuffer;
+GLuint indexBuffer;
+GLuint pointBuffer;
 
-///////////////////////////////////////////////////////////////////////////////
-// Light source
-///////////////////////////////////////////////////////////////////////////////
-vec3 lightPosition;
-vec3 point_light_color = vec3(1.f, 1.f, 1.f);
+glm::vec3 g_triangleColor = { 1, 1, 1 };
+glm::vec3 g_pointPosition = { 0, 0, 0 };
 
-float point_light_intensity_multiplier = 10000.0f;
+std::vector<glm::vec3> vertices;
+std::vector<glm::uvec3> indices;
+std::vector<glm::vec3> colors;
+std::vector<glm::vec3> points;
 
+//Default values, maybe implement some way to change via GUI
+//int N = 9;
+float dt = 0.1f, diff = 0.5f, visc = 0.5f;
+float force = 5.0f, source = 100.0f;
+int dvel = 0; //Draw velocity or not, this is not implemented yet
 
+int grid_res = SIZE;
+int grid_size = (grid_res + 1) * (grid_res + 1);
+float colChange = 0;
+int rowChange = 0;
+int columnChange = 0;
 
-
-///////////////////////////////////////////////////////////////////////////////
-// Camera parameters.
-///////////////////////////////////////////////////////////////////////////////
-vec3 cameraPosition(-70.0f, 50.0f, 70.0f);
-vec3 cameraDirection = normalize(vec3(0.0f) - cameraPosition);
-float cameraSpeed = 10.f;
-
-vec3 worldUp(0.0f, 1.0f, 0.0f);
+particles::FluidCube* fluidCube;
+glm::ivec2 emitterPos = { SIZE / 2, 4 };
+glm::vec2 emitterDir = { 0.0f, 0.5f };
 
 ///////////////////////////////////////////////////////////////////////////////
 // Models
 ///////////////////////////////////////////////////////////////////////////////
-labhelper::Model* fighterModel = nullptr;
-labhelper::Model* landingpadModel = nullptr;
-labhelper::Model* sphereModel = nullptr;
-
-mat4 roomModelMatrix;
-mat4 landingPadModelMatrix;
-mat4 fighterModelMatrix;
 
 void loadShaders(bool is_reload)
 {
 	GLuint shader = labhelper::loadShaderProgram("../project/simple.vert", "../project/simple.frag", is_reload);
 	if(shader != 0)
 	{
-		simpleShaderProgram = shader;
-	}
-
-	shader = labhelper::loadShaderProgram("../project/background.vert", "../project/background.frag", is_reload);
-	if(shader != 0)
-	{
-		backgroundProgram = shader;
-	}
-
-	shader = labhelper::loadShaderProgram("../project/shading.vert", "../project/shading.frag", is_reload);
-	if(shader != 0)
-	{
 		shaderProgram = shader;
 	}
 }
 
+////////////////////////////////////////////////////////////////////////////////
+// Generate Grid
+////////////////////////////////////////////////////////////////////////////////
+
+void generateGrid(int N, std::vector<glm::vec3> &vertices, std::vector<glm::uvec3> &indices, std::vector<glm::vec3> &colors, std::vector<glm::vec3> &points) {
+
+	std::vector<glm::vec3> verticesTemp;
+	for (int i = 0; i <= N; i++) { //Generate vertices
+		for (int j = 0; j <= N; j++) {
+
+			float x = ((float)j / (float)N - 0.5f);
+			float y = ((float)i / (float)N - 0.5f);
+			float z = 1.0f;
+			verticesTemp.push_back(glm::vec3(x, y, z));
+		}
+	}
+
+	for (int i = 0; i < N; i++) {
+		for (int j = 0; j < N; j++) {
+			int offset_horizontal = i * (N + 1);
+			int offset_vertical = (i + 1) * (N + 1);
+
+			int a = (j + offset_horizontal);
+			int b = (j + 1 + offset_horizontal);
+			int c = (j + offset_vertical);
+			indices.push_back(glm::uvec3(a, b, c));
+			vertices.push_back(verticesTemp[a]);
+			vertices.push_back(verticesTemp[b]);
+			vertices.push_back(verticesTemp[c]);
+
+			a = (j + 1 + offset_horizontal);
+			b = (j + 1 + offset_vertical);
+			c = (j + offset_vertical);
+			indices.push_back(glm::uvec3(a, b, c));
+			vertices.push_back(verticesTemp[a]);
+			vertices.push_back(verticesTemp[b]);
+			vertices.push_back(verticesTemp[c]);
+		}
+	}
+
+	for (int i = 0; i < vertices.size(); i++) {
+		colors.push_back(glm::vec3(0.0, 0.0, 0.0));
+	}
+	
+	for (char j = 1; j <= N; j++) {
+		for (char i = 1; i <= N; i++) {
+			float x = (i * (1 / N));
+			float y = (j * (1 / N));
+			float z = 1.0;
+			points.push_back(glm::vec3(x, y, z));
+		}
+	}
+
+	/////////////////////////////////////////////////////// Uncomment for debug
+	//printf("Calculated vertices:");
+	//for (int i = 0; i < vertices.size(); i++) {
+	//	if (i % 3 == 0) {
+	//		printf("\n");
+	//	}
+	//	printf("%f\n", vertices[i]);
+	//}
+
+	//printf("\nCalculated Indices:");
+	//for (int j = 0; j < indices.size(); j++) { //Print calculated indices
+	//	for (uint i = 0; i < 3; i++) {
+	//		printf("%d ", indices[j][i]);
+	//	}
+	//	printf("\n");	
+	//}
+}
+
+void emitter_driver(particles::FluidCube* cube) {
+	particles::fcAddDensity(cube, emitterPos.x, emitterPos.y, 0.5f);
+	particles::fcAddDensity(cube, emitterPos.x + 1, emitterPos.y, 0.5f);
+	particles::fcAddDensity(cube, emitterPos.x, emitterPos.y + 1, 0.5f);
+	particles::fcAddDensity(cube, emitterPos.x + 1, emitterPos.y + 1, 0.5f);
+
+	particles::fcAddVelocity(cube, emitterPos.x, emitterPos.y, emitterDir.x, emitterDir.y);
+	particles::fcAddVelocity(cube, emitterPos.x + 1, emitterPos.y, emitterDir.x, emitterDir.y + 0.1f);
+	particles::fcAddVelocity(cube, emitterPos.x, emitterPos.y + 1, emitterDir.x-0.1f, emitterDir.y);
+	particles::fcAddVelocity(cube, emitterPos.x + 1, emitterPos.y + 1, emitterDir.x, emitterDir.y - 0.1f);
+
+	
+	particles::fcAddVelocity(fluidCube, 2, SIZE / 2, 0.5f, 0.01f);
+	particles::fcAddVelocity(fluidCube, SIZE - 5, SIZE / 2 - 5, -0.4f, -0.3f);
+}
+
+static void draw_density(particles::FluidCube* fc, std::vector<glm::vec3>& colors, GLuint vao, GLuint buff)
+{	
+	int N = fc->size;
+	for (int j = 0; j < N; j++) {
+		for (int i = 0; i < N; i++) {
+			float d = 0.0;
+			//if (i == 0 && j == 0) {
+			//	fc->density[XY(i, j)] = 0.5f;
+			//}
+			d = fc->density[XY(i, j)]; //Look up density at (x,y) in density field
+			if (d > 0.001) { //Might wanna tweak this threshold
+				glm::vec3 newDens = { d,d,d };
+				int n = sqrt(colors.size() / 6);
+				for (char k = 0; k < 6; k++) {
+					colors[k + 6 * i + (6 * j * n)] = newDens;
+				}
+			}
+		}
+	}
+	glBindVertexArray(vao);
+	glBindBuffer(GL_ARRAY_BUFFER, buff);
+	glBufferData(GL_ARRAY_BUFFER, colors.size() * 3 * sizeof(float), &colors[0], GL_DYNAMIC_DRAW);
+	glVertexAttribPointer(1, 3, GL_FLOAT, false /*normalized*/, 0 /*stride*/, 0 /*offset*/);
+	glEnableVertexAttribArray(1);
+	glBindVertexArray(0);
+}
 
 ///////////////////////////////////////////////////////////////////////////////
 /// This function is called once at the start of the program and never again
@@ -115,94 +237,49 @@ void initialize()
 	///////////////////////////////////////////////////////////////////////
 	loadShaders(false);
 
-	///////////////////////////////////////////////////////////////////////
-	// Load models and set up model matrices
-	///////////////////////////////////////////////////////////////////////
-	fighterModel = labhelper::loadModelFromOBJ("../scenes/NewShip.obj");
-	landingpadModel = labhelper::loadModelFromOBJ("../scenes/landingpad.obj");
-	sphereModel = labhelper::loadModelFromOBJ("../scenes/sphere.obj");
+	generateGrid(SIZE, vertices, indices, colors, points);
 
-	roomModelMatrix = mat4(1.0f);
-	fighterModelMatrix = translate(15.0f * worldUp);
-	landingPadModelMatrix = mat4(1.0f);
+	glGenBuffers(1, &positionBuffer);
+	glGenBuffers(1, &indexBuffer);
+	glGenBuffers(1, &colorBuffer);
+	glGenBuffers(1, &pointBuffer);
+	glGenVertexArrays(1, &cubeVAO);
 
-	///////////////////////////////////////////////////////////////////////
-	// Load environment map
-	///////////////////////////////////////////////////////////////////////
-	environmentMap = labhelper::loadHdrTexture("../scenes/envmaps/" + envmap_base_name + ".hdr");
+	glBindVertexArray(cubeVAO);
 
+	glBindBuffer(GL_ARRAY_BUFFER, positionBuffer);
+	glBufferData(GL_ARRAY_BUFFER, vertices.size() * 3 * sizeof(float), &vertices[0], GL_STATIC_DRAW);
+	//glBufferData(GL_ARRAY_BUFFER, vertices.size()*3*sizeof(float), &vertices[0], GL_STATIC_DRAW);
+	glVertexAttribPointer(0, 3, GL_FLOAT, false /*normalized*/, 0 /*stride*/, 0 /*offset*/); // Attaches positionBuffer to vertexArrayObject, in the 0th attribute location
+	glEnableVertexAttribArray(0);
 
-	glEnable(GL_DEPTH_TEST); // enable Z-buffering
-	glEnable(GL_CULL_FACE);  // enables backface culling
+	//glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBuffer); //Seems like indexing won't be possible w/ color changing in this was :(
+	//glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * 3 * sizeof(int), &indices[0], GL_STATIC_DRAW);
+
+	glBindBuffer(GL_ARRAY_BUFFER, colorBuffer);
+	glBufferData(GL_ARRAY_BUFFER, colors.size() * 3 * sizeof(float), &colors[0], GL_DYNAMIC_DRAW);
+	glVertexAttribPointer(1, 3, GL_FLOAT, false /*normalized*/, 0 /*stride*/, 0 /*offset*/);
+	glEnableVertexAttribArray(1);
+
+	glBindBuffer(GL_ARRAY_BUFFER, pointBuffer);
+	glBufferData(GL_ARRAY_BUFFER, points.size() * 3 * sizeof(float), &points[0], GL_STATIC_DRAW);
+	glVertexAttribPointer(2, 3, GL_FLOAT, false, 0, 0);
+	glEnableVertexAttribArray(2);
+
+	//glEnable(GL_DEPTH_TEST); // enable Z-buffering
+	glDisable(GL_CULL_FACE);
+	glEnable(GL_PROGRAM_POINT_SIZE);
+
+	///////////////////////////////////////////////////////////////////////////
+	//init simulation cube
+	fluidCube = particles::fcCreate(SIZE, diff,visc, dt);
+	particles::fcAddDensity(fluidCube, 4, 4, 0.5f);
+	particles::fcAddVelocity(fluidCube, 1, 1, -0.2f, 0.5f);
+	particles::fcAddVelocity(fluidCube, 2, 1, 0.f, 0.5f);
+	particles::fcAddVelocity(fluidCube, 3, 1, 0.2f, 0.5f);
+
+	
 }
-
-void debugDrawLight(const glm::mat4& viewMatrix,
-                    const glm::mat4& projectionMatrix,
-                    const glm::vec3& worldSpaceLightPos)
-{
-	mat4 modelMatrix = glm::translate(worldSpaceLightPos);
-	glUseProgram(shaderProgram);
-	labhelper::setUniformSlow(shaderProgram, "modelViewProjectionMatrix",
-	                          projectionMatrix * viewMatrix * modelMatrix);
-	labhelper::render(sphereModel);
-}
-
-
-void drawBackground(const mat4& viewMatrix, const mat4& projectionMatrix)
-{
-	glUseProgram(backgroundProgram);
-	labhelper::setUniformSlow(backgroundProgram, "environment_multiplier", environment_multiplier);
-	labhelper::setUniformSlow(backgroundProgram, "inv_PV", inverse(projectionMatrix * viewMatrix));
-	labhelper::setUniformSlow(backgroundProgram, "camera_pos", cameraPosition);
-	labhelper::drawFullScreenQuad();
-}
-
-
-///////////////////////////////////////////////////////////////////////////////
-/// This function is used to draw the main objects on the scene
-///////////////////////////////////////////////////////////////////////////////
-void drawScene(GLuint currentShaderProgram,
-               const mat4& viewMatrix,
-               const mat4& projectionMatrix,
-               const mat4& lightViewMatrix,
-               const mat4& lightProjectionMatrix)
-{
-	glUseProgram(currentShaderProgram);
-	// Light source
-	vec4 viewSpaceLightPosition = viewMatrix * vec4(lightPosition, 1.0f);
-	labhelper::setUniformSlow(currentShaderProgram, "point_light_color", point_light_color);
-	labhelper::setUniformSlow(currentShaderProgram, "point_light_intensity_multiplier",
-	                          point_light_intensity_multiplier);
-	labhelper::setUniformSlow(currentShaderProgram, "viewSpaceLightPosition", vec3(viewSpaceLightPosition));
-	labhelper::setUniformSlow(currentShaderProgram, "viewSpaceLightDir",
-	                          normalize(vec3(viewMatrix * vec4(-lightPosition, 0.0f))));
-
-
-	// Environment
-	labhelper::setUniformSlow(currentShaderProgram, "environment_multiplier", environment_multiplier);
-
-	// camera
-	labhelper::setUniformSlow(currentShaderProgram, "viewInverse", inverse(viewMatrix));
-
-	// landing pad
-	labhelper::setUniformSlow(currentShaderProgram, "modelViewProjectionMatrix",
-	                          projectionMatrix * viewMatrix * landingPadModelMatrix);
-	labhelper::setUniformSlow(currentShaderProgram, "modelViewMatrix", viewMatrix * landingPadModelMatrix);
-	labhelper::setUniformSlow(currentShaderProgram, "normalMatrix",
-	                          inverse(transpose(viewMatrix * landingPadModelMatrix)));
-
-	labhelper::render(landingpadModel);
-
-	// Fighter
-	labhelper::setUniformSlow(currentShaderProgram, "modelViewProjectionMatrix",
-	                          projectionMatrix * viewMatrix * fighterModelMatrix);
-	labhelper::setUniformSlow(currentShaderProgram, "modelViewMatrix", viewMatrix * fighterModelMatrix);
-	labhelper::setUniformSlow(currentShaderProgram, "normalMatrix",
-	                          inverse(transpose(viewMatrix * fighterModelMatrix)));
-
-	labhelper::render(fighterModel);
-}
-
 
 ///////////////////////////////////////////////////////////////////////////////
 /// This function will be called once per frame, so the code to set up
@@ -210,58 +287,28 @@ void drawScene(GLuint currentShaderProgram,
 ///////////////////////////////////////////////////////////////////////////////
 void display(void)
 {
-	labhelper::perf::Scope s( "Display" );
+	//labhelper::perf::Scope s("Display");
 
 	///////////////////////////////////////////////////////////////////////////
 	// Check if window size has changed and resize buffers as needed
 	///////////////////////////////////////////////////////////////////////////
-	{
-		int w, h;
-		SDL_GetWindowSize(g_window, &w, &h);
-		if(w != windowWidth || h != windowHeight)
-		{
-			windowWidth = w;
-			windowHeight = h;
-		}
-	}
-
-	///////////////////////////////////////////////////////////////////////////
-	// setup matrices
-	///////////////////////////////////////////////////////////////////////////
-	mat4 projMatrix = perspective(radians(45.0f), float(windowWidth) / float(windowHeight), 5.0f, 2000.0f);
-	mat4 viewMatrix = lookAt(cameraPosition, cameraPosition + cameraDirection, worldUp);
-
-	vec4 lightStartPosition = vec4(40.0f, 40.0f, 0.0f, 1.0f);
-	lightPosition = vec3(rotate(currentTime, worldUp) * lightStartPosition);
-	mat4 lightViewMatrix = lookAt(lightPosition, vec3(0.0f), worldUp);
-	mat4 lightProjMatrix = perspective(radians(45.0f), 1.0f, 25.0f, 100.0f);
-
-	///////////////////////////////////////////////////////////////////////////
-	// Bind the environment map(s) to unused texture units
-	///////////////////////////////////////////////////////////////////////////
-	glActiveTexture(GL_TEXTURE6);
-	glBindTexture(GL_TEXTURE_2D, environmentMap);
-	glActiveTexture(GL_TEXTURE0);
-
-
-	///////////////////////////////////////////////////////////////////////////
-	// Draw from camera
-	///////////////////////////////////////////////////////////////////////////
-	glBindFramebuffer(GL_FRAMEBUFFER, 0);
-	glViewport(0, 0, windowWidth, windowHeight);
-	glClearColor(0.2f, 0.2f, 0.8f, 1.0f);
+	int w, h;
+	SDL_GetWindowSize(g_window, &w, &h);
+	glViewport(0, 0, w, h); // Set viewport
+	
+	glClearColor(0.1f, 0.1f, 0.1f, 0.0);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	
+	emitter_driver(fluidCube);
+	draw_density(fluidCube, colors, cubeVAO, colorBuffer); //TODO drive the simulation and get density/velocity input from somewhere (mouse?)
 
-	{
-		labhelper::perf::Scope s( "Background" );
-		drawBackground(viewMatrix, projMatrix);
-	}
-	{
-		labhelper::perf::Scope s( "Scene" );
-		drawScene( shaderProgram, viewMatrix, projMatrix, lightViewMatrix, lightProjMatrix );
-	}
-	debugDrawLight(viewMatrix, projMatrix, vec3(lightPosition));
+	glUseProgram(shaderProgram);
 
+	glBindVertexArray(cubeVAO);
+	//labhelper::setUniformSlow(shaderProgram, "color_uni", glm::vec3(0.1,0.1,0.3));
+	glDrawArrays(GL_TRIANGLES, 0, 6 * SIZE * SIZE);
+
+	glUseProgram(0);
 }
 
 
@@ -292,8 +339,8 @@ bool handleEvents(void)
 				labhelper::showGUI();
 			}
 		}
-		if(event.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_LEFT
-		   && (!labhelper::isGUIvisible() || !ImGui::GetIO().WantCaptureMouse))
+		if (event.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_LEFT
+			&& (!labhelper::isGUIvisible() || !ImGui::GetIO().WantCaptureMouse))
 		{
 			g_isMouseDragging = true;
 			int x;
@@ -301,55 +348,28 @@ bool handleEvents(void)
 			SDL_GetMouseState(&x, &y);
 			g_prevMouseCoords.x = x;
 			g_prevMouseCoords.y = y;
+			//dens[XY(x, y)] = source;
 		}
 
-		if(!(SDL_GetMouseState(NULL, NULL) & SDL_BUTTON(SDL_BUTTON_LEFT)))
+		if (!(SDL_GetMouseState(NULL, NULL) & SDL_BUTTON(SDL_BUTTON_LEFT)))
 		{
 			g_isMouseDragging = false;
 		}
 
-		if(event.type == SDL_MOUSEMOTION && g_isMouseDragging)
+		if (event.type == SDL_MOUSEMOTION && g_isMouseDragging)
 		{
-			// More info at https://wiki.libsdl.org/SDL_MouseMotionEvent
-			int delta_x = event.motion.x - g_prevMouseCoords.x;
-			int delta_y = event.motion.y - g_prevMouseCoords.y;
-			float rotationSpeed = 0.1f;
-			mat4 yaw = rotate(rotationSpeed * deltaTime * -delta_x, worldUp);
-			mat4 pitch = rotate(rotationSpeed * deltaTime * -delta_y,
-			                    normalize(cross(cameraDirection, worldUp)));
-			cameraDirection = vec3(pitch * yaw * vec4(cameraDirection, 0.0f));
-			g_prevMouseCoords.x = event.motion.x;
-			g_prevMouseCoords.y = event.motion.y;
+			//// More info at https://wiki.libsdl.org/SDL_MouseMotionEvent
+			//int delta_x = event.motion.x - g_prevMouseCoords.x;
+			//int delta_y = event.motion.y - g_prevMouseCoords.y;
+			//float rotationSpeed = 0.1f;
+			//mat4 yaw = rotate(rotationSpeed * deltaTime * -delta_x, worldUp);
+			//mat4 pitch = rotate(rotationSpeed * deltaTime * -delta_y,
+			//	normalize(cross(cameraDirection, worldUp)));
+			//cameraDirection = vec3(pitch * yaw * vec4(cameraDirection, 0.0f));
+			//g_prevMouseCoords.x = event.motion.x;
+			//g_prevMouseCoords.y = event.motion.y;
 		}
-	}
 
-	// check keyboard state (which keys are still pressed)
-	const uint8_t* state = SDL_GetKeyboardState(nullptr);
-	vec3 cameraRight = cross(cameraDirection, worldUp);
-
-	if(state[SDL_SCANCODE_W])
-	{
-		cameraPosition += cameraSpeed * deltaTime * cameraDirection;
-	}
-	if(state[SDL_SCANCODE_S])
-	{
-		cameraPosition -= cameraSpeed * deltaTime * cameraDirection;
-	}
-	if(state[SDL_SCANCODE_A])
-	{
-		cameraPosition -= cameraSpeed * deltaTime * cameraRight;
-	}
-	if(state[SDL_SCANCODE_D])
-	{
-		cameraPosition += cameraSpeed * deltaTime * cameraRight;
-	}
-	if(state[SDL_SCANCODE_Q])
-	{
-		cameraPosition -= cameraSpeed * deltaTime * worldUp;
-	}
-	if(state[SDL_SCANCODE_E])
-	{
-		cameraPosition += cameraSpeed * deltaTime * worldUp;
 	}
 	return quitEvent;
 }
@@ -365,16 +385,21 @@ void gui()
 	            ImGui::GetIO().Framerate);
 	// ----------------------------------------------------------
 
-
+	ImGui::SliderFloat("Diffusion", &diff, 0.0f, 1.0f);
+	ImGui::SliderFloat("Viscosity", &visc, 0.0f, 1.0f);
+	ImGui::SliderInt("Emitter x pos", &emitterPos.x, 1, SIZE - 1);
+	ImGui::SliderInt("Emitter y pos", &emitterPos.y, 1, SIZE - 1);
+	ImGui::SliderFloat("Emitter dir x ", &emitterDir.x, -1.f, 1.f);
+	ImGui::SliderFloat("Emitter dir y ", &emitterDir.y, -1.f, 1.f);
 	////////////////////////////////////////////////////////////////////////////////
 	////////////////////////////////////////////////////////////////////////////////
 
-	labhelper::perf::drawEventsWindow();
+	//labhelper::perf::drawEventsWindow();
 }
 
 int main(int argc, char* argv[])
 {
-	g_window = labhelper::init_window_SDL("OpenGL Project");
+	g_window = labhelper::init_window_SDL("OpenGL Project", 600, 600);
 
 	initialize();
 
@@ -395,6 +420,9 @@ int main(int argc, char* argv[])
 		// Inform imgui of new frame
 		labhelper::newFrame( g_window );
 
+		//Drive the simulation
+		particles::fluidCubeStep(fluidCube);
+
 		// render to window
 		display();
 
@@ -407,10 +435,8 @@ int main(int argc, char* argv[])
 		// Swap front and back buffer. This frame will now been displayed.
 		SDL_GL_SwapWindow(g_window);
 	}
-	// Free Models
-	labhelper::freeModel(fighterModel);
-	labhelper::freeModel(landingpadModel);
-	labhelper::freeModel(sphereModel);
+
+	particles::fcFree(fluidCube);
 
 	// Shut down everything. This includes the window and all other subsystems.
 	labhelper::shutDown(g_window);

@@ -13,6 +13,8 @@ source_group("Shaders" FILES ${SHADERS})
 # Build and link executable.
 add_executable ( ${PROJECT_NAME}
     main.cpp
+    particles.h
+    particles.cpp
     ${SHADERS}
     )
 
