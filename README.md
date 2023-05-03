@@ -1,6 +1,5 @@
 # Description
-This is the repository for the basic project template for the Advanced Computer Graphics course given at Chalmers University of
-Technology.
+A smoke simulation project for the advanced computer graphics course at chalmers. Project is based on project-template code provided by the course.
 
 You can find instructions on how to build at http://www.cse.chalmers.se/edu/course/TDA362/tutorials/start.html
 
