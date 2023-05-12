@@ -29,8 +29,10 @@ using namespace glm;
 #include "hdr.h"
 #include "fbo.h"
 
+#define SIZE 32
+#define ABSORBTION 0.5f
 #define XY(i,j) ((i)+(N*2)*(j))
-#define SIZE 124
+#define XYZ(x,y,z) ((x) + (y) * N + (z) * N * N)
 
 ///////////////////////////////////////////////////////////////////////////////
 /*
@@ -77,10 +79,35 @@ GLuint pointBuffer;
 glm::vec3 g_triangleColor = { 1, 1, 1 };
 glm::vec3 g_pointPosition = { 0, 0, 0 };
 
-std::vector<glm::vec3> vertices;
-std::vector<glm::uvec3> indices;
+//std::vector<glm::vec3> vertices;
+//std::vector<glm::uvec3> indices;
 std::vector<glm::vec3> colors;
 std::vector<glm::vec3> points;
+
+//////////////////////////////////////////////////////////////////////////////
+// Stuff for the volumetric rendering
+//////////////////////////////////////////////////////////////////////////////
+GLuint framebuffer;
+GLuint renderTexture;
+
+GLuint VAO;
+GLuint VBO;
+GLuint EBO;
+
+vec3 *imageBuff = new vec3[SIZE*SIZE];
+
+float vertices[] = {
+	// positions          // colors           // texture coords
+	 0.5f,  0.5f, 0.0f,   1.0f, 0.0f, 0.0f,   1.0f, 1.0f,   // top right
+	 0.5f, -0.5f, 0.0f,   0.0f, 1.0f, 0.0f,   1.0f, 0.0f,   // bottom right
+	-0.5f, -0.5f, 0.0f,   0.0f, 0.0f, 1.0f,   0.0f, 0.0f,   // bottom left
+	-0.5f,  0.5f, 0.0f,   1.0f, 1.0f, 0.0f,   0.0f, 1.0f    // top left 
+};
+
+unsigned int indices[] = {
+	0, 1, 3,   // first triangle
+	1, 2, 3
+};
 
 //Default values, maybe implement some way to change via GUI
 //int N = 9;
@@ -90,13 +117,10 @@ int dvel = 0; //Draw velocity or not, this is not implemented yet
 
 int grid_res = SIZE;
 int grid_size = (grid_res + 1) * (grid_res + 1);
-float colChange = 0;
-int rowChange = 0;
-int columnChange = 0;
 
 particles::FluidCube* fluidCube;
-glm::ivec2 emitterPos = { SIZE / 2, 4 };
-glm::vec2 emitterDir = { 0.0f, 0.5f };
+glm::ivec3 emitterPos = { SIZE / 2, 4, SIZE / 2 };
+glm::vec3 emitterDir = { 0.0f, 0.5f, 0.f };
 
 ///////////////////////////////////////////////////////////////////////////////
 // Models
@@ -183,47 +207,47 @@ void generateGrid(int N, std::vector<glm::vec3> &vertices, std::vector<glm::uvec
 }
 
 void emitter_driver(particles::FluidCube* cube) {
-	particles::fcAddDensity(cube, emitterPos.x, emitterPos.y, 0.5f);
-	particles::fcAddDensity(cube, emitterPos.x + 1, emitterPos.y, 0.5f);
-	particles::fcAddDensity(cube, emitterPos.x, emitterPos.y + 1, 0.5f);
-	particles::fcAddDensity(cube, emitterPos.x + 1, emitterPos.y + 1, 0.5f);
+	particles::fcAddDensity(cube, emitterPos.x, emitterPos.y, emitterPos.z, 0.5f);
+	particles::fcAddDensity(cube, emitterPos.x + 1, emitterPos.y, emitterPos.z, 0.5f);
+	particles::fcAddDensity(cube, emitterPos.x, emitterPos.y + 1, emitterPos.z, 0.5f);
+	particles::fcAddDensity(cube, emitterPos.x + 1, emitterPos.y + 1, emitterPos.z, 0.5f);
 
-	particles::fcAddVelocity(cube, emitterPos.x, emitterPos.y, emitterDir.x, emitterDir.y);
-	particles::fcAddVelocity(cube, emitterPos.x + 1, emitterPos.y, emitterDir.x, emitterDir.y + 0.1f);
-	particles::fcAddVelocity(cube, emitterPos.x, emitterPos.y + 1, emitterDir.x-0.1f, emitterDir.y);
-	particles::fcAddVelocity(cube, emitterPos.x + 1, emitterPos.y + 1, emitterDir.x, emitterDir.y - 0.1f);
+	particles::fcAddVelocity(cube, emitterPos.x, emitterPos.y, emitterPos.z, emitterDir.x, emitterDir.y, emitterDir.z);
+	particles::fcAddVelocity(cube, emitterPos.x + 1, emitterPos.y, emitterPos.z, emitterDir.x, emitterDir.y + 0.1f, emitterDir.z);
+	particles::fcAddVelocity(cube, emitterPos.x, emitterPos.y + 1, emitterPos.z, emitterDir.x-0.1f, emitterDir.y, emitterDir.z);
+	particles::fcAddVelocity(cube, emitterPos.x + 1, emitterPos.y + 1, emitterPos.z, emitterDir.x, emitterDir.y - 0.1f, emitterDir.z);
 
 	
-	particles::fcAddVelocity(fluidCube, 2, SIZE / 2, 0.5f, 0.01f);
-	particles::fcAddVelocity(fluidCube, SIZE - 5, SIZE / 2 - 5, -0.4f, -0.3f);
+	particles::fcAddVelocity(fluidCube, 2, SIZE / 2, SIZE / 2, 0.5f, 0.01f, 0.5f);
+	particles::fcAddVelocity(fluidCube, SIZE - 5, SIZE / 2 - 5, SIZE / 2 - 5 , -0.4f, -0.3f, 0.5f);
 }
 
-static void draw_density(particles::FluidCube* fc, std::vector<glm::vec3>& colors, GLuint vao, GLuint buff)
+static void draw_density(particles::FluidCube* fc, vec3* imgBuf)
 {	
 	int N = fc->size;
-	for (int j = 0; j < N; j++) {
-		for (int i = 0; i < N; i++) {
-			float d = 0.0;
-			//if (i == 0 && j == 0) {
-			//	fc->density[XY(i, j)] = 0.5f;
-			//}
-			d = fc->density[XY(i, j)]; //Look up density at (x,y) in density field
-			if (d > 0.001) { //Might wanna tweak this threshold
-				glm::vec3 newDens = { d,d,d };
-				int n = sqrt(colors.size() / 6);
-				for (char k = 0; k < 6; k++) {
-					colors[k + 6 * i + (6 * j * n)] = newDens;
-				}
+	for (int j = 1; j < N-1; j++) {
+		for (int i = 1; i < N-1; i++) {
+			float distance = 0; 
+			for (int k = 1; k < N-1; k++) { //Loop through all densities along "ray" (z-axis in this case)
+				distance += 1 * fc->density[XYZ(i, j, -k)]; // IS -Z INTO OR OUT FROM SCREEN???
+				//printf("Density at %d,%d,%d is: %f\n", i, j, k, fc->density[XYZ(i, j, k)]);
 			}
+			float result = exp(-distance * ABSORBTION); //Beers law??
 		}
+		imgBuf[XY(j, j)] = vec3(1.f);
 	}
-	glBindVertexArray(vao);
-	glBindBuffer(GL_ARRAY_BUFFER, buff);
-	glBufferData(GL_ARRAY_BUFFER, colors.size() * 3 * sizeof(float), &colors[0], GL_DYNAMIC_DRAW);
-	glVertexAttribPointer(1, 3, GL_FLOAT, false /*normalized*/, 0 /*stride*/, 0 /*offset*/);
-	glEnableVertexAttribArray(1);
-	glBindVertexArray(0);
+	glBindTexture(GL_TEXTURE_2D, renderTexture);
+	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, N, N, GL_RGB, GL_FLOAT, imgBuf);
+	//glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, N, N, 0, GL_RGB, GL_FLOAT, imgBuf);
+	glBindTexture(GL_TEXTURE_2D, 0);
+	
 }
+
+//vec3 insane_ray_trace(float* densityField, int size, vec3 rayOrigin, vec3 rayDir) {
+//	
+//}
+
+
 
 ///////////////////////////////////////////////////////////////////////////////
 /// This function is called once at the start of the program and never again
@@ -232,39 +256,42 @@ void initialize()
 {
 	ENSURE_INITIALIZE_ONLY_ONCE();
 
+	//for (int i = 0; i < SIZE * SIZE; i++) {
+	//	imageBuff[i].x = 1.f;
+	//	imageBuff[i].y = 0.f;
+	//	imageBuff[i].z = 1.f;
+	//}
+
 	///////////////////////////////////////////////////////////////////////
 	//		Load Shaders
 	///////////////////////////////////////////////////////////////////////
 	loadShaders(false);
 
-	generateGrid(SIZE, vertices, indices, colors, points);
+	//glGenFramebuffers(1, &framebuffer);
+	//glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+	glGenTextures(1, &renderTexture);
+	glBindTexture(GL_TEXTURE_2D, renderTexture);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, SIZE, SIZE, 0, GL_RGB, GL_FLOAT, imageBuff);
 
-	glGenBuffers(1, &positionBuffer);
-	glGenBuffers(1, &indexBuffer);
-	glGenBuffers(1, &colorBuffer);
-	glGenBuffers(1, &pointBuffer);
-	glGenVertexArrays(1, &cubeVAO);
+	glGenVertexArrays(1, &VAO);
+	glBindVertexArray(VAO);
 
-	glBindVertexArray(cubeVAO);
-
-	glBindBuffer(GL_ARRAY_BUFFER, positionBuffer);
-	glBufferData(GL_ARRAY_BUFFER, vertices.size() * 3 * sizeof(float), &vertices[0], GL_STATIC_DRAW);
-	//glBufferData(GL_ARRAY_BUFFER, vertices.size()*3*sizeof(float), &vertices[0], GL_STATIC_DRAW);
-	glVertexAttribPointer(0, 3, GL_FLOAT, false /*normalized*/, 0 /*stride*/, 0 /*offset*/); // Attaches positionBuffer to vertexArrayObject, in the 0th attribute location
-	glEnableVertexAttribArray(0);
-
-	//glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, indexBuffer); //Seems like indexing won't be possible w/ color changing in this was :(
-	//glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * 3 * sizeof(int), &indices[0], GL_STATIC_DRAW);
-
-	glBindBuffer(GL_ARRAY_BUFFER, colorBuffer);
-	glBufferData(GL_ARRAY_BUFFER, colors.size() * 3 * sizeof(float), &colors[0], GL_DYNAMIC_DRAW);
-	glVertexAttribPointer(1, 3, GL_FLOAT, false /*normalized*/, 0 /*stride*/, 0 /*offset*/);
+	glGenBuffers(1, &VBO);
+	glGenBuffers(1, &EBO);
+	
+	glBindBuffer(GL_ARRAY_BUFFER, VBO);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_DYNAMIC_DRAW);
+	
+	glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(6 * sizeof(float)));
 	glEnableVertexAttribArray(1);
 
-	glBindBuffer(GL_ARRAY_BUFFER, pointBuffer);
-	glBufferData(GL_ARRAY_BUFFER, points.size() * 3 * sizeof(float), &points[0], GL_STATIC_DRAW);
-	glVertexAttribPointer(2, 3, GL_FLOAT, false, 0, 0);
-	glEnableVertexAttribArray(2);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*) 0);
+	glEnableVertexAttribArray(0);
+
 
 	//glEnable(GL_DEPTH_TEST); // enable Z-buffering
 	glDisable(GL_CULL_FACE);
@@ -273,10 +300,17 @@ void initialize()
 	///////////////////////////////////////////////////////////////////////////
 	//init simulation cube
 	fluidCube = particles::fcCreate(SIZE, diff,visc, dt);
-	particles::fcAddDensity(fluidCube, 4, 4, 0.5f);
-	particles::fcAddVelocity(fluidCube, 1, 1, -0.2f, 0.5f);
-	particles::fcAddVelocity(fluidCube, 2, 1, 0.f, 0.5f);
-	particles::fcAddVelocity(fluidCube, 3, 1, 0.2f, 0.5f);
+	particles::fcAddDensity(fluidCube, 15, 15, (SIZE / 2), 0.5f);
+	particles::fcAddDensity(fluidCube, 14, 11, (SIZE / 2), 0.5f);
+	particles::fcAddDensity(fluidCube, 14, 11, (SIZE / 2), 0.5f);
+	particles::fcAddDensity(fluidCube, 14, 12, (SIZE / 2), 0.5f);
+	particles::fcAddDensity(fluidCube, 12, 13, (SIZE / 2), 0.5f);
+	particles::fcAddDensity(fluidCube, 12, 14, (SIZE / 2), 0.5f);
+	particles::fcAddDensity(fluidCube, 11, 15, (SIZE / 2), 0.5f);
+	particles::fcAddDensity(fluidCube, 11, 16, (SIZE / 2), 0.5f);
+	particles::fcAddVelocity(fluidCube, 1, 1, 1, -0.2f, 0.5f, 0.5f);
+	particles::fcAddVelocity(fluidCube, 2, 1, 1, 0.f, 0.5f, 0.5f);
+	particles::fcAddVelocity(fluidCube, 3, 1, 1, 0.2f, 0.5f, 0.5f);
 
 	
 }
@@ -300,13 +334,15 @@ void display(void)
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	
 	emitter_driver(fluidCube);
-	draw_density(fluidCube, colors, cubeVAO, colorBuffer); //TODO drive the simulation and get density/velocity input from somewhere (mouse?)
+	draw_density(fluidCube, imageBuff);
 
 	glUseProgram(shaderProgram);
 
-	glBindVertexArray(cubeVAO);
+	glBindTexture(GL_TEXTURE_2D, renderTexture);
+	glBindVertexArray(VAO);
 	//labhelper::setUniformSlow(shaderProgram, "color_uni", glm::vec3(0.1,0.1,0.3));
-	glDrawArrays(GL_TRIANGLES, 0, 6 * SIZE * SIZE);
+	//glDrawArrays(GL_TRIANGLES, 0, 6 * SIZE * SIZE);
+	glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 
 	glUseProgram(0);
 }
@@ -385,12 +421,12 @@ void gui()
 	            ImGui::GetIO().Framerate);
 	// ----------------------------------------------------------
 
-	ImGui::SliderFloat("Diffusion", &diff, 0.0f, 1.0f);
-	ImGui::SliderFloat("Viscosity", &visc, 0.0f, 1.0f);
-	ImGui::SliderInt("Emitter x pos", &emitterPos.x, 1, SIZE - 1);
-	ImGui::SliderInt("Emitter y pos", &emitterPos.y, 1, SIZE - 1);
-	ImGui::SliderFloat("Emitter dir x ", &emitterDir.x, -1.f, 1.f);
-	ImGui::SliderFloat("Emitter dir y ", &emitterDir.y, -1.f, 1.f);
+	//ImGui::SliderFloat("Diffusion", &diff, 0.0f, 1.0f);
+	//ImGui::SliderFloat("Viscosity", &visc, 0.0f, 1.0f);
+	//ImGui::SliderInt("Emitter x pos", &emitterPos.x, 1, SIZE - 1);
+	//ImGui::SliderInt("Emitter y pos", &emitterPos.y, 1, SIZE - 1);
+	//ImGui::SliderFloat("Emitter dir x ", &emitterDir.x, -1.f, 1.f);
+	//ImGui::SliderFloat("Emitter dir y ", &emitterDir.y, -1.f, 1.f);
 	////////////////////////////////////////////////////////////////////////////////
 	////////////////////////////////////////////////////////////////////////////////
 

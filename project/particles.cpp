@@ -17,7 +17,7 @@ https://mikeash.com/pyblog/fluid-simulation-for-dummies.html (Which is an implem
 */
 
 #define SWAP(x0,x) {float *tmp=x0;x0=x;x=tmp;} //Swaps two array pointers
-#define XY(i,j) ((i)+(N*2)*(j))
+#define XYZ(x,y,z) ((x) + (y) * N + (z) * N * N)
 //int N;
 
 namespace particles {
@@ -36,13 +36,16 @@ namespace particles {
 		cube->s	= (float*) calloc(n, sizeof(float)); //== dens_prev?
 		cube->density = (float*)calloc(n, sizeof(float));
 
-		cube->Vx = (float*) malloc(n * sizeof(float));
-		cube->Vy = (float*)malloc(n * sizeof(float));
-		//cube->Vz = (float*) calloc(size * size * size, sizeof(float));
+		cube->Vx = (float*) calloc(n, sizeof(float));
+		cube->Vy = (float*) calloc(n, sizeof(float));
+		cube->Vz = (float*) calloc(size * size * size, sizeof(float));
 
-		cube->Vx0 = (float*) malloc(n * sizeof(float));
-		cube->Vy0 = (float*) malloc(n * sizeof(float));
-		//cube->Vz0 = (float*) calloc(size * size * size, sizeof(float));
+		cube->Vx0 = (float*) calloc(n, sizeof(float));
+		cube->Vy0 = (float*) calloc(n, sizeof(float));
+		cube->Vz0 = (float*) calloc(size * size * size, sizeof(float));
+
+		//cube->minBound = ivec3(0);
+		//cube->maxBound = ivec3(size);
 
 		return cube;
 	}
@@ -54,11 +57,11 @@ namespace particles {
 
 		free(cube->Vx);
 		free(cube->Vy);
-		//free(cube->Vz);
+		free(cube->Vz);
 
 		free(cube->Vx0);
 		free(cube->Vy0);
-		//free(cube->Vz0);
+		free(cube->Vz0);
 
 		free(cube);
 	}
@@ -67,34 +70,50 @@ namespace particles {
 	//the velocity should be zero on the horizontal walls"
 	//This is straight from the paper, mikeash's code is somewhat different, might use that when moving to 3D
 	void set_bnd(int b, float* x, int N) {
-		int i;
-		for (i = 1; i <= N; i++) {	
-			x[XY(0, i)] = b == 1 ? -1 * x[XY(1, i)] : x[XY(1, i)];     
-			x[XY(N + 1, i)] = b == 1 ? -1 * x[XY(N, i)] : x[XY(N, i)];
-			x[XY(i, 0)] = b == 2 ? -1 * x[XY(i, 1)] : x[XY(i, 1)];
-			x[XY(i, N + 1)] = b == 2 ? -1 * x[XY(i, N)] : x[XY(i, N)];
+		for (int j = 1; j < N - 1; j++) { //TODO kolla om detta verkligen behöver göras i separata loopar
+			for (int i = 1; i < N - 1; i++) {
+				x[XYZ(i, j, 0)] = b == 3 ? -x[XYZ(i, j, 1)] : x[XYZ(i, j, 1)];
+				x[XYZ(i, j, N - 1)] = b == 3 ? -x[XYZ(i, j, N - 2)] : x[XYZ(i, j, N - 2)];
+			}
 		}
-		x[XY(0, 0)] = 0.5 * (x[XY(1, 0)] + x[XY(0, 1)]);
-		x[XY(0, N + 1)] = 0.5 * (x[XY(1, N + 1)] + x[XY(0, N)]);
-		x[XY(N + 1, 0)] = 0.5 * (x[XY(N, 0)] + x[XY(N + 1, 1)]);
-		x[XY(N + 1, N + 1)] = 0.5 * (x[XY(N, N + 1)] + x[XY(N + 1, N)]);
+		for (int k = 1; k < N - 1; k++) {
+			for (int i = 1; i < N - 1; i++) {
+				x[XYZ(i, 0, k)] = b == 2 ? -x[XYZ(i, 1, k)] : x[XYZ(i, 1, k)];
+				x[XYZ(i, N - 1, k)] = b == 2 ? -x[XYZ(i, N - 2, k)] : x[XYZ(i, N - 2, k)];
+			}
+		}
+		for (int k = 1; k < N - 1; k++) {
+			for (int j = 1; j < N - 1; j++) {
+				x[XYZ(0, j, k)] = b == 1 ? -x[XYZ(1, j, k)] : x[XYZ(1, j, k)];
+				x[XYZ(N - 1, j, k)] = b == 1 ? -x[XYZ(N - 2, j, k)] : x[XYZ(N - 2, j, k)];
+			}
+		}
+
+		x[XYZ(0, 0, 0)] = 0.33f * (x[XYZ(1, 0, 0)] + x[XYZ(0, 1, 0)] + x[XYZ(0, 0, 1)]);
+		x[XYZ(0, N - 1, 0)] = 0.33f * (x[XYZ(1, N - 1, 0)] + x[XYZ(0, N - 2, 0)] + x[XYZ(0, N - 1, 1)]);
+		x[XYZ(0, 0, N - 1)] = 0.33f * (x[XYZ(1, 0, N - 1)] + x[XYZ(0, 1, N - 1)] + x[XYZ(0, 0, N)]);
+		x[XYZ(0, N - 1, N - 1)] = 0.33f * (x[XYZ(1, N - 1, N - 1)] + x[XYZ(0, N - 2, N - 1)] + x[XYZ(0, N - 1, N - 2)]);
+		x[XYZ(N - 1, 0, 0)] = 0.33f * (x[XYZ(N - 2, 0, 0)] + x[XYZ(N - 1, 1, 0)] + x[XYZ(N - 1, 0, 1)]);
+		x[XYZ(N - 1, N - 1, 0)] = 0.33f * (x[XYZ(N - 2, N - 1, 0)] + x[XYZ(N - 1, N - 2, 0)] + x[XYZ(N - 1, N - 1, 1)]);
+		x[XYZ(N - 1, 0, N - 1)] = 0.33f * (x[XYZ(N - 2, 0, N - 1)] + x[XYZ(N - 1, 1, N - 1)] + x[XYZ(N - 1, 0, N - 2)]);
+		x[XYZ(N - 1, N - 1, N - 1)] = 0.33f * (x[XYZ(N - 2, N - 1, N - 1)] + x[XYZ(N - 1, N - 2, N - 1)] + x[XYZ(N - 1, N - 1, N - 2)]);
 	}
 
-	void fcAddDensity(FluidCube* cube, int x, int y, /*int z,*/float amount) { //Take force input from mouse or something "outside force"
+	void fcAddDensity(FluidCube* cube, int x, int y, int z,float amount) { //Take force input from mouse or something "outside force"
 		int N = cube->size;
-		cube->density[XY(x, y)] += amount;
-		//float dens = cube->density[XY(x, y)];
+		cube->density[XYZ(x, y, z)] += amount;
+		//float dens = cube->density[XYZ(x, y, z)];
 		//printf("Added density at (%d,%d): %f\n", x, y, dens);
 	}
 
-	void fcAddVelocity(FluidCube* cube, int x, int y, /*int z,*/ float amountX, float amountY/*, float amountZ*/)
+	void fcAddVelocity(FluidCube* cube, int x, int y, int z, float amountX, float amountY, float amountZ)
 	{
 		int N = cube->size;
-		int index = XY(x, y);
+		int index = XYZ(x, y, z);
 
 		cube->Vx[index] += amountX;
 		cube->Vy[index] += amountY;
-		//cube->Vz[index] += amountZ;
+		cube->Vz[index] += amountZ;
 	}
 
 	//Exchange densities with neighboring cells. The smoke "leaks" into the neighboring cells
@@ -102,84 +121,135 @@ namespace particles {
 	//This is the Ash implementation, the original does (1+4*a) instead of * cReciprocal
 	//This is because the linear solve is broken out of the diffuse func from the paper
 	void lin_solve(int b, float* x, float* x0, float a, float c, int iter, int N) {
-		float cReciprocal = 1.0 / c;
+		float cRecip = 1.0 / c;
 		for (int k = 0; k < iter; k++) {
-			for (int j = 1; j < N-1; j++) {
-				for (int i = 1; i < N-1; i++) {
-					x[XY(i, j)] = (x0[XY(i, j)]
-						+ a* (x0[XY(i - 1, j)] 
-							+ x0[XY(i + 1, j)] 
-							+ x0[XY(i, j - 1)]
-							+ x0[XY(i, j + 1)]))
-							* cReciprocal;
+			for (int m = 1; m < N - 1; m++) {
+				for (int j = 1; j < N - 1; j++) {
+					for (int i = 1; i < N - 1; i++) {
+						x[XYZ(i, j, m)] =
+							(x0[XYZ(i, j, m)]
+								+ a *(x[XYZ(i + 1, j, m)]
+									+ x[XYZ(i - 1, j, m)]
+									+ x[XYZ(i, j + 1, m)]
+									+ x[XYZ(i, j - 1, m)]
+									+ x[XYZ(i, j, m + 1)]
+									+ x[XYZ(i, j, m - 1)])
+									) * cRecip;
+					}
 				}
 			}
-		set_bnd(b ,x , N);
+			set_bnd(b, x, N);
 		}
 	}
 
 	void diffuse(int b, float* x, float* x0, float diff, float dt, int iter, int N) {
 		float a = dt * diff * (N - 2) * (N - 2);
-		lin_solve(b, x, x0, a, 1 + 4 * a, iter, N); //This 4 should maybe be a 6 in 3D
+		lin_solve(b, x, x0, a, 1 + 6 * a, iter, N); //This 4 should maybe be a 6 in 3D
 	}
 
-	//This badboy is from the paper, mike ash impl is somewhat different due to xyz
+	//This badboy is from the paper, mike ash impl is somewhat different due to XYZz
 	//This function looks at the velocity in each cell and traces it back it time and sees where it lands.
 	//It then performes a weighted average of the cells around the spot and applies that value to the current cell.
-	void advect(int b, float* d, float* d0, float* u, float* v, /*float* velocZ,*/ float dt, int N) {
-		float dt0 = dt * N;
-		int i0, j0, i1, j1;
-		float s0, t0, s1, t1, x, y;
-		for (int i = 1; i < N; i++) {
-			for (int j = 1; j < N; j++) {
-				x = i - dt0 * u[XY(i, j)];
-				y = j - dt0 * v[XY(i, j)];
-				if (x < 0.5f) x = 0.5f;
-				if (x > N + 0.5f) x = N + 0.5f;
-				i0 = (int)x;
-				i1 = i0 + 1;
-				if (y < 0.5) y = 0.5f;
-				if (y > N + 0.5) y = N + 0.5f;
-				j0 = (int)y;
-				j1 = j0 + 1;
-				s1 = x - i0;
-				s0 = 1 - s1;
-				t1 = y - j0;
-				t0 = 1 - t1;
-				d[XY(i, j)] = s0 * (t0 * d0[XY(i0, j0)] + t1 * d0[XY(i0, j1)]) + //TODO Fixa minnesgrejjen
-					s1 * (t0 * d0[XY(i1, j0)] + t1 * d0[XY(i1, j1)]);
+	void advect(int b, float* d, float* d0, float* u, float* v, float* w, float dt, int N) {
+		float i0, i1, j0, j1, k0, k1;
+
+		float dtx = dt * (N - 2);
+		float dty = dt * (N - 2);
+		float dtz = dt * (N - 2);
+
+		float s0, s1, t0, t1, u0, u1;
+		float tmp1, tmp2, tmp3, x, y, z;
+
+		float Nfloat = N;
+		float ifloat, jfloat, kfloat;
+		int i, j, k;
+
+		for (k = 1, kfloat = 1; k < N - 1; k++, kfloat++) {
+			for (j = 1, jfloat = 1; j < N - 1; j++, jfloat++) {
+				for (i = 1, ifloat = 1; i < N - 1; i++, ifloat++) {
+					tmp1 = dtx * u[XYZ(i, j, k)];
+					tmp2 = dty * v[XYZ(i, j, k)];
+					tmp3 = dtz * w[XYZ(i, j, k)];
+					x = ifloat - tmp1;
+					y = jfloat - tmp2;
+					z = kfloat - tmp3;
+
+					if (x < 0.5f) x = 0.5f;
+					if (x > Nfloat + 0.5f) x = Nfloat + 0.5f;
+					i0 = floorf(x);
+					i1 = i0 + 1.0f;
+					if (y < 0.5f) y = 0.5f;
+					if (y > Nfloat + 0.5f) y = Nfloat + 0.5f;
+					j0 = floorf(y);
+					j1 = j0 + 1.0f;
+					if (z < 0.5f) z = 0.5f;
+					if (z > Nfloat + 0.5f) z = Nfloat + 0.5f;
+					k0 = floorf(z);
+					k1 = k0 + 1.0f;
+
+					s1 = x - i0;
+					s0 = 1.0f - s1;
+					t1 = y - j0;
+					t0 = 1.0f - t1;
+					u1 = z - k0;
+					u0 = 1.0f - u1;
+
+					int i0i = (int) i0;
+					int i1i = (int) i1;
+					int j0i = (int) j0;
+					int j1i = (int) j1;
+					int k0i = (int) k0;
+					int k1i = (int) k1;
+
+					d[XYZ(i, j, k)] = 
+						s0 * (t0 * (u0 * d0[XYZ(i0i, j0i, k0i)] + u1 * d0[XYZ(i0i, j0i, k1i)])
+							+(t1 * (u0 * d0[XYZ(i0i, j1i, k0i)] + u1 * d0[XYZ(i0i, j1i, k1i)])))
+					  + s1 * (t0 * (u0 * d0[XYZ(i1i, j0i, k0i)] + u1 * d0[XYZ(i1i, j0i, k1i)])
+							+(t1 * (u0 * d0[XYZ(i1i, j1i, k0i)] + u1 * d0[XYZ(i1i, j1i, k1i)])));
+				}
 			}
 		}
 		set_bnd(b, d, N);
+
 	}
 
 	//Poisson equation, using Gauss-Seidel relaxation again to solve system of equations.
 	//This implementation is from the original paper,
-	void project(float* u, float* v, /*float* velocZ,*/ float* p, float* div, int iter, int N) {
-		float h = 1.0 / N;
-		for (int i = 1; i <= N; i++) {
-			for (int j = 1; j <= N; j++) {
-				div[XY(i, j)] = -0.5f * (
-					  u[XY(i + 1, j)] 
-					- u[XY(i - 1, j)] 
-					+ v[XY(i, j + 1)] 
-					- v[XY(i, j - 1)])
-					* h; //
-				p[XY(i, j)] = 0;
+	void project(float* u, float* v, float* w, float* p, float* div, int iter, int N) {
+		for (int k = 1; k < N - 1; k++) {
+			for (int j = 1; j < N - 1; j++) {
+				for (int i = 1; i < N - 1; i++) {
+					div[XYZ(i, j, k)] = -0.5f * (
+						u[XYZ(i + 1, j, k)]
+						- u[XYZ(i - 1, j, k)]
+						+ v[XYZ(i, j + 1, k)]
+						- v[XYZ(i, j - 1, k)]
+						+ w[XYZ(i, j, k + 1)]
+						- w[XYZ(i, j, k - 1)]
+						) / N;
+					p[XYZ(i, j, k)] = 0;
+				}
 			}
 		}
 		set_bnd(0, div, N);
 		set_bnd(0, p, N);
-		lin_solve(0, p, div, 1, 4, iter, N);
+		lin_solve(0, p, div, 1, 6, iter, N);
 
-		for (int i = 1; i <= N; i++) {
-			for (int j = 1; j <= N; j++) {
-				u[XY(i, j)] -= 0.5 * (p[XY(i + 1, j)] - p[XY(i - 1, j)]) / h;
-				v[XY(i, j)] -= 0.5 * (p[XY(i, j + 1)] - p[XY(i, j - 1)]) / h;
+		for (int k = 1; k < N - 1; k++) {
+			for (int j = 1; j < N - 1; j++) {
+				for (int i = 1; i < N - 1; i++) {
+					u[XYZ(i, j, k)] -= 0.5f * (p[XYZ(i + 1, j, k)]
+						- p[XYZ(i - 1, j, k)]) * N;
+					v[XYZ(i, j, k)] -= 0.5f * (p[XYZ(i, j + 1, k)]
+						- p[XYZ(i, j - 1, k)]) * N;
+					w[XYZ(i, j, k)] -= 0.5f * (p[XYZ(i, j, k + 1)]
+						- p[XYZ(i, j, k - 1)]) * N;
+				}
 			}
 		}
 		set_bnd(1, u, N);
 		set_bnd(2, v, N);
+		set_bnd(3, w, N);
 	}
 
 
@@ -191,25 +261,26 @@ namespace particles {
 		float dt = cube->dt;
 		float* Vx = cube->Vx;
 		float* Vy = cube->Vy;
-		//float* Vz = cube->Vz;
+		float* Vz = cube->Vz;
 		float* Vx0 = cube->Vx0;
 		float* Vy0 = cube->Vy0;
-		//float* Vz0 = cube->Vz0;
+		float* Vz0 = cube->Vz0;
 		float* s = cube->s; //I wonder what this represents? Seems like it's just empty. Replaces the swap step from original impl somehow
 		float* density = cube->density;
 
-		diffuse(1, Vx0, Vx, visc, dt, 20, N); //Default is 4 iterations
-		diffuse(2, Vy0, Vy, visc, dt, 20, N);
-		//diffuse(3, Vz0, Vz, visc, dt, 4, N);
+		diffuse(1, Vx0, Vx, visc, dt, 4, N); //Default is 4 iterations
+		diffuse(2, Vy0, Vy, visc, dt, 4, N);
+		diffuse(3, Vz0, Vz, visc, dt, 4, N);
 
-		project(Vx0, Vy0, /*Vz0,*/ Vx, Vy, 20, N);
+		project(Vx0, Vy0, Vz0, Vx, Vy, 4, N);
 
-		advect(1, Vx, Vx0, Vx0, Vy0, /*Vz0,*/ dt, N);
-		advect(2, Vy, Vy0, Vx0, Vy0, /*Vz0,*/ dt, N);
+		advect(1, Vx, Vx0, Vx0, Vy0, Vz0, dt, N);
+		advect(2, Vy, Vy0, Vx0, Vy0, Vz0, dt, N);
+		advect(3, Vz, Vz0, Vx0, Vy0, Vz0, dt, N);
 
-		project(Vx, Vy, /*Vz,*/ Vx0, Vy0, 20, N);
+		project(Vx, Vy, Vz, Vx0, Vy0, 4, N);
 
-		diffuse(0, s, density, diff, dt, 20, N);
-		advect(0, density, s, Vx, Vy, /*Vz,*/ dt, N);
+		diffuse(0, s, density, diff, dt, 4, N);
+		advect(0, density, s, Vx, Vy, Vz, dt, N);
 	}
 } //namespace particles
