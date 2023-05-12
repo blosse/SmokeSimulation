@@ -224,6 +224,8 @@ void emitter_driver(particles::FluidCube* cube) {
 
 static void draw_density(particles::FluidCube* fc, vec3* imgBuf)
 {	
+	vec3 bg_color = { 0.1f, 0.1f, 0.1f };
+	vec3 vl_color = { 0.9, 0.85, 0.85 };
 	int N = fc->size;
 	for (int j = 1; j < N-1; j++) {
 		for (int i = 1; i < N-1; i++) {
@@ -232,7 +234,7 @@ static void draw_density(particles::FluidCube* fc, vec3* imgBuf)
 					distance += 1 * fc->density[XYZ(i, j, k)]; // IS -Z INTO OR OUT FROM SCREEN???
 			}
 			float result = exp(-distance * ABSORBTION); //Beers law??
-			imgBuf[XY(i,j)] = vec3(1-result); //Nått med att XY landar utanför arrayen verkar det som
+			imgBuf[XY(i,j)] = result * bg_color + (1-result) * vl_color; //Nått med att XY landar utanför arrayen verkar det som
 		}
 	}
 	glBindTexture(GL_TEXTURE_2D, renderTexture);
@@ -255,11 +257,13 @@ void initialize()
 {
 	ENSURE_INITIALIZE_ONLY_ONCE();
 
-	//for (int i = 0; i < SIZE * SIZE; i++) {
-	//	imageBuff[i].x = 1.f;
-	//	imageBuff[i].y = 0.f;
-	//	imageBuff[i].z = 1.f;
-	//}
+	//Init the image buffer w/ gray
+	for (int i = 0; i < SIZE * SIZE; i++) {
+		imageBuff[i].x = 0.1f;
+		imageBuff[i].y = 0.1f;
+		imageBuff[i].z = 0.1f;
+		//imageBuff[i].w = 1.f;
+	}
 
 	///////////////////////////////////////////////////////////////////////
 	//		Load Shaders
