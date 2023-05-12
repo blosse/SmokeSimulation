@@ -30,8 +30,8 @@ using namespace glm;
 #include "fbo.h"
 
 #define SIZE 32
-#define ABSORBTION 0.5f
-#define XY(i,j) ((i)+(N*2)*(j))
+#define ABSORBTION 0.2f
+#define XY(i,j) ((i)+(N*j))
 #define XYZ(x,y,z) ((x) + (y) * N + (z) * N * N)
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -228,13 +228,12 @@ static void draw_density(particles::FluidCube* fc, vec3* imgBuf)
 	for (int j = 1; j < N-1; j++) {
 		for (int i = 1; i < N-1; i++) {
 			float distance = 0; 
-			for (int k = 1; k < N-1; k++) { //Loop through all densities along "ray" (z-axis in this case)
-				distance += 1 * fc->density[XYZ(i, j, -k)]; // IS -Z INTO OR OUT FROM SCREEN???
-				//printf("Density at %d,%d,%d is: %f\n", i, j, k, fc->density[XYZ(i, j, k)]);
+				for (int k = 1; k < N-1; k++) { //Loop through all densities along "ray" (z-axis in this case)
+					distance += 1 * fc->density[XYZ(i, j, k)]; // IS -Z INTO OR OUT FROM SCREEN???
 			}
 			float result = exp(-distance * ABSORBTION); //Beers law??
+			imgBuf[XY(i,j)] = vec3(1-result); //Nått med att XY landar utanför arrayen verkar det som
 		}
-		imgBuf[XY(j, j)] = vec3(1.f);
 	}
 	glBindTexture(GL_TEXTURE_2D, renderTexture);
 	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, N, N, GL_RGB, GL_FLOAT, imgBuf);
@@ -421,12 +420,12 @@ void gui()
 	            ImGui::GetIO().Framerate);
 	// ----------------------------------------------------------
 
-	//ImGui::SliderFloat("Diffusion", &diff, 0.0f, 1.0f);
-	//ImGui::SliderFloat("Viscosity", &visc, 0.0f, 1.0f);
-	//ImGui::SliderInt("Emitter x pos", &emitterPos.x, 1, SIZE - 1);
-	//ImGui::SliderInt("Emitter y pos", &emitterPos.y, 1, SIZE - 1);
-	//ImGui::SliderFloat("Emitter dir x ", &emitterDir.x, -1.f, 1.f);
-	//ImGui::SliderFloat("Emitter dir y ", &emitterDir.y, -1.f, 1.f);
+	ImGui::SliderFloat("Diffusion", &diff, 0.0f, 1.0f);
+	ImGui::SliderFloat("Viscosity", &visc, 0.0f, 1.0f);
+	ImGui::SliderInt("Emitter x pos", &emitterPos.x, 1, SIZE - 1);
+	ImGui::SliderInt("Emitter y pos", &emitterPos.y, 1, SIZE - 1);
+	ImGui::SliderFloat("Emitter dir x ", &emitterDir.x, -1.f, 1.f);
+	ImGui::SliderFloat("Emitter dir y ", &emitterDir.y, -1.f, 1.f);
 	////////////////////////////////////////////////////////////////////////////////
 	////////////////////////////////////////////////////////////////////////////////
 
