@@ -15,6 +15,7 @@ add_executable ( ${PROJECT_NAME}
     main.cpp
     particles.h
     particles.cpp
+    volRender.h
     ${SHADERS}
     )
 

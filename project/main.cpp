@@ -18,6 +18,7 @@ extern "C" _declspec(dllexport) unsigned int NvOptimusEnablement = 0x00000001;
 #include <labhelper.h>
 #include <imgui.h>
 #include "particles.h"
+#include "volRender.h"
 
 #include <perf.h>
 
@@ -225,7 +226,7 @@ void emitter_driver(particles::FluidCube* cube) {
 static void draw_density(particles::FluidCube* fc, vec3* imgBuf)
 {	
 	vec3 bg_color = { 0.1f, 0.1f, 0.1f };
-	vec3 vl_color = { 0.9, 0.85, 0.85 };
+	vec3 vl_color = { 0.9, 0.5, 0.5 };
 	int N = fc->size;
 	for (int j = 1; j < N-1; j++) {
 		for (int i = 1; i < N-1; i++) {
@@ -302,7 +303,7 @@ void initialize()
 
 	///////////////////////////////////////////////////////////////////////////
 	//init simulation cube
-	fluidCube = particles::fcCreate(SIZE, diff,visc, dt);
+	fluidCube = particles::fcCreate(SIZE, diff,visc, ABSORBTION, dt);
 	particles::fcAddDensity(fluidCube, 15, 15, (SIZE / 2), 0.5f);
 	particles::fcAddDensity(fluidCube, 14, 11, (SIZE / 2), 0.5f);
 	particles::fcAddDensity(fluidCube, 14, 11, (SIZE / 2), 0.5f);

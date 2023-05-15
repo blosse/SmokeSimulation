@@ -2,9 +2,12 @@
 
 #include <GL/glew.h>
 #include <vector>
+#include <glm/glm.hpp>
 #include <glm/detail/type_vec3.hpp>
 #include <glm/mat4x4.hpp>
 #include <stdlib.h>
+
+using namespace glm;
 
 namespace particles {
 	struct FluidCube { //Gonna start w/ a 2d grid
@@ -12,6 +15,7 @@ namespace particles {
 		float dt;
 		float diff;
 		float visc;
+		float absorbtion;
 
 		float* s;
 		float* density;
@@ -24,12 +28,12 @@ namespace particles {
 		float* Vy0;
 		float* Vz0;
 
-		//ivec3 minBound;
-		//ivec3 maxBound;
+		fvec3 minBound;
+		fvec3 maxBound;
 	};
 	typedef struct FluidCube FluidCube;
 
-	FluidCube* fcCreate(int size, int diffusion, int viscosity, float dt);
+	FluidCube* fcCreate(int size, int diffusion, int viscosity, float absorbtion, float dt);
 	void fluidCubeStep(FluidCube* cube);
 	void fcFree(FluidCube* cube);
 	void set_bnd(int b, float* x, int N);

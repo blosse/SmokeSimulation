@@ -1,0 +1,83 @@
+#version 430
+
+//Adaptation of diffuse function for compute shader, hopefully works equivalently
+//Currently only a single thread will execute the "set_bnd", this probably quite slow,
+//Should figure out a solution for that.
+
+precision highp float;
+
+layout (local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+
+//Images
+layout (r32f, binding = 0) uniform image2D diffusion_x0; //previous densities
+layout (r32f, binding = 1) uniform image2D diffusion_x1; //new densitites
+//Variables
+uniform int size;
+uniform float a;
+uniform float c;
+uniform int b;
+
+void main() {
+	ivec2 pos = ivec2(gl_GlobalInvocationID.x + 1, gl_GlobalInvocationID.y + 1 ); //This +1 might not work as I hope it will
+	float x = 0.f;
+	float x0    = imageLoad(diffusion_x1, pos).r; //x0[x,y]
+	float x_dX1 = imageLoad(diffusion_x1, ivec2(pos.x-1, pos.y)).r; //x0[x-1, y]
+	float x_dX2 = imageLoad(diffusion_x1, ivec2(pos.x+1, pos.y)).r; //x0[x+1, y]
+	float x_dY1 = imageLoad(diffusion_x1, ivec2(pos.x, pos.y-1)).r; //x0[x, y-1]
+	float x_dY2 = imageLoad(diffusion_x1, ivec2(pos.x, pos.y+1)).r; //x0[x, y+1]
+	x =      (x0 
+		 + a*(x_dX1
+			+ x_dX2
+			+ x_dY1
+			+ x_dY2))
+			* c;
+	memoryBarrier();
+	imageStore(diffusion_x1, pos, vec4(x, 0.0, 0.0, 0.0));
+	memoryBarrierImage();
+
+	//The following is compute shader implementation of set_bnd
+	if(gl_GlobalInvocationID == ivec3(0)) {
+		int i;
+		for (i = 1; i <= size; i++) {	
+			float x1_i = imageLoad(diffusion_x1, ivec2(1,i)).r;
+			float xN_i = imageLoad(diffusion_x1, ivec2(size,i)).r;
+			float xi_1 = imageLoad(diffusion_x1, ivec2(i,1)).r;
+			float xi_N1 = imageLoad(diffusion_x1, ivec2(i,size)).r;
+			if (b==1) {
+				imageStore(diffusion_x1, ivec2(0,i), -1* vec4(x1_i,0,0,0));
+				imageStore(diffusion_x1, ivec2(size + 1, i), -1*vec4(xN_i,0,0,0));
+				}
+			else if (b==2) {
+				imageStore(diffusion_x1, ivec2(i,1), -1*vec4(xi_1,0,0,0));
+				imageStore(diffusion_x1, ivec2(i,size+1), -1*vec4(xi_N1,0,0,0));
+				}
+			else {
+				imageStore(diffusion_x1, ivec2(0,i), vec4(x1_i, 0, 0, 0));
+				imageStore(diffusion_x1, ivec2(size + 1, i), vec4(xN_i, 0,0,0));
+				imageStore(diffusion_x1, ivec2(i,1), vec4(xi_1,0,0,0));
+				imageStore(diffusion_x1, ivec2(i,size+1), vec4(xi_N1,0,0,0));
+				}
+			}
+		//x[XY(0, 0)] = 0.5 * (x[XY(1, 0)] + x[XY(0, 1)]);
+		//x[XY(0, N + 1)] = 0.5 * (x[XY(1, N + 1)] + x[XY(0, N)]);
+		//x[XY(N + 1, 0)] = 0.5 * (x[XY(N, 0)] + x[XY(N + 1, 1)]);
+		//x[XY(N + 1, N + 1)] = 0.5 * (x[XY(N, N + 1)] + x[XY(N + 1, N)]);
+		
+		float x1_0 = imageLoad(diffusion_x1, ivec2(1,0)).r;
+		float x0_1 = imageLoad(diffusion_x1, ivec2(0,1)).r;
+		
+		float x1_N1 = imageLoad(diffusion_x1, ivec2(1,size + 1)).r;
+		float x0_N = imageLoad(diffusion_x1, ivec2(0,size)).r;
+		
+		float xN_0 = imageLoad(diffusion_x1, ivec2(size, 0)).r;
+		float xN1_1 = imageLoad(diffusion_x1, ivec2(size + 1, 1)).r;
+		
+		float xN_N1 = imageLoad(diffusion_x1, ivec2(size,size + 1)).r;
+		float xN1_N = imageLoad(diffusion_x1, ivec2(size + 1,size)).r;
+	
+		imageStore(diffusion_x1, ivec2(0,0),vec4(0.5*(x1_0  + x0_1), 0,0,0));
+		imageStore(diffusion_x1, ivec2(0,size+1),vec4(0.5*(x1_N1  + x0_N), 0,0,0));
+		imageStore(diffusion_x1, ivec2(size+1, 0),vec4(0.5*(xN_0  + xN1_1), 0,0,0));
+		imageStore(diffusion_x1, ivec2(size+1,size+1),vec4(0.5*(xN_N1  + xN1_N), 0,0,0));
+	}	
+}

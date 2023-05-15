@@ -22,7 +22,7 @@ https://mikeash.com/pyblog/fluid-simulation-for-dummies.html (Which is an implem
 
 namespace particles {
 
-	FluidCube* fcCreate(int size, int diffusion, int viscosity, float dt)
+	FluidCube* fcCreate(int size, int diffusion, int viscosity, float absorbtion, float dt)
 	{
 		FluidCube* cube = (FluidCube*) malloc(sizeof(*cube));
 
@@ -32,6 +32,7 @@ namespace particles {
 		cube->dt = dt;
 		cube->diff = diffusion;
 		cube->visc = viscosity;
+		cube->absorbtion = absorbtion;
 
 		cube->s	= (float*) calloc(n, sizeof(float)); //== dens_prev?
 		cube->density = (float*)calloc(n, sizeof(float));
@@ -44,8 +45,8 @@ namespace particles {
 		cube->Vy0 = (float*) calloc(n, sizeof(float));
 		cube->Vz0 = (float*) calloc(size * size * size, sizeof(float));
 
-		//cube->minBound = ivec3(0);
-		//cube->maxBound = ivec3(size);
+		cube->minBound = fvec3(0);
+		cube->maxBound = fvec3(size);
 
 		return cube;
 	}
