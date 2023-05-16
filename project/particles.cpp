@@ -1,4 +1,4 @@
-#include "Particles.h"
+#include "particles.h"
 #include <algorithm>
 #include <GL/glew.h>
 #include <glm/glm.hpp>
@@ -16,13 +16,12 @@ or
 https://mikeash.com/pyblog/fluid-simulation-for-dummies.html (Which is an implementation of the paper by Stam)
 */
 
-#define SWAP(x0,x) {float *tmp=x0;x0=x;x=tmp;} //Swaps two array pointers
 #define XYZ(x,y,z) ((x) + (y) * N + (z) * N * N)
 //int N;
 
 namespace particles {
 
-	FluidCube* fcCreate(int size, int diffusion, int viscosity, float absorbtion, float dt)
+	FluidCube* fcCreate(int size, int diffusion, int viscosity, float absorbtion, float scattering, float dt)
 	{
 		FluidCube* cube = (FluidCube*) malloc(sizeof(*cube));
 
@@ -33,6 +32,7 @@ namespace particles {
 		cube->diff = diffusion;
 		cube->visc = viscosity;
 		cube->absorbtion = absorbtion;
+		cube->scattering = scattering;
 
 		cube->s	= (float*) calloc(n, sizeof(float)); //== dens_prev?
 		cube->density = (float*)calloc(n, sizeof(float));
@@ -45,8 +45,8 @@ namespace particles {
 		cube->Vy0 = (float*) calloc(n, sizeof(float));
 		cube->Vz0 = (float*) calloc(size * size * size, sizeof(float));
 
-		cube->minBound = fvec3(0);
-		cube->maxBound = fvec3(size);
+		cube->minBound = fvec3(-16, -16, -53);
+		cube->maxBound = fvec3(16, 16, - 21);
 
 		return cube;
 	}
@@ -283,5 +283,17 @@ namespace particles {
 
 		diffuse(0, s, density, diff, dt, 4, N);
 		advect(0, density, s, Vx, Vy, Vz, dt, N);
+	}
+
+	float sampleDensity(FluidCube* fc, vec3 sample_pos) {
+		int N = fc->size; //If we want to scale the cube, maybe scale here by field-size/world-size
+		//recalculate from world coords to "density coords", maybe this can be done w/ some nice matrix instead
+		int x = floor(sample_pos.x - fc->minBound.x);
+		int y = floor(sample_pos.y - fc->minBound.y);
+		int z = floor(sample_pos.z - fc->minBound.z);
+		float density = fc->density[XYZ(x, y, z)];
+		//printf("Sampling fc-space (%d,%d,%d)\n", x, y, z);
+		//printf("Returning %f\n", density);
+		return density;
 	}
 } //namespace particles
