@@ -92,7 +92,7 @@ namespace particles {
 
 		x[XYZ(0, 0, 0)] = 0.33f * (x[XYZ(1, 0, 0)] + x[XYZ(0, 1, 0)] + x[XYZ(0, 0, 1)]);
 		x[XYZ(0, N - 1, 0)] = 0.33f * (x[XYZ(1, N - 1, 0)] + x[XYZ(0, N - 2, 0)] + x[XYZ(0, N - 1, 1)]);
-		x[XYZ(0, 0, N - 1)] = 0.33f * (x[XYZ(1, 0, N - 1)] + x[XYZ(0, 1, N - 1)] + x[XYZ(0, 0, N)]);
+		x[XYZ(0, 0, N - 1)] = 0.33f * (x[XYZ(1, 0, N - 1)] + x[XYZ(0, 1, N - 1)] + x[XYZ(0, 0, N-2)]);
 		x[XYZ(0, N - 1, N - 1)] = 0.33f * (x[XYZ(1, N - 1, N - 1)] + x[XYZ(0, N - 2, N - 1)] + x[XYZ(0, N - 1, N - 2)]);
 		x[XYZ(N - 1, 0, 0)] = 0.33f * (x[XYZ(N - 2, 0, 0)] + x[XYZ(N - 1, 1, 0)] + x[XYZ(N - 1, 0, 1)]);
 		x[XYZ(N - 1, N - 1, 0)] = 0.33f * (x[XYZ(N - 2, N - 1, 0)] + x[XYZ(N - 1, N - 2, 0)] + x[XYZ(N - 1, N - 1, 1)]);
@@ -161,7 +161,7 @@ namespace particles {
 		float s0, s1, t0, t1, u0, u1;
 		float tmp1, tmp2, tmp3, x, y, z;
 
-		float Nfloat = N;
+		float Nfloat = (float) N;
 		float ifloat, jfloat, kfloat;
 		int i, j, k;
 
@@ -177,15 +177,15 @@ namespace particles {
 
 					if (x < 0.5f) x = 0.5f;
 					if (x > Nfloat + 0.5f) x = Nfloat + 0.5f;
-					i0 = floorf(x);
+					i0 = floor(x);
 					i1 = i0 + 1.0f;
 					if (y < 0.5f) y = 0.5f;
 					if (y > Nfloat + 0.5f) y = Nfloat + 0.5f;
-					j0 = floorf(y);
+					j0 = floor(y);
 					j1 = j0 + 1.0f;
 					if (z < 0.5f) z = 0.5f;
 					if (z > Nfloat + 0.5f) z = Nfloat + 0.5f;
-					k0 = floorf(z);
+					k0 = floor(z);
 					k1 = k0 + 1.0f;
 
 					s1 = x - i0;
@@ -211,12 +211,12 @@ namespace particles {
 			}
 		}
 		set_bnd(b, d, N);
-
 	}
 
 	//Poisson equation, using Gauss-Seidel relaxation again to solve system of equations.
 	//This implementation is from the original paper,
 	void project(float* u, float* v, float* w, float* p, float* div, int iter, int N) {
+		float invN = (float) 1 / N;
 		for (int k = 1; k < N - 1; k++) {
 			for (int j = 1; j < N - 1; j++) {
 				for (int i = 1; i < N - 1; i++) {
@@ -227,7 +227,7 @@ namespace particles {
 						- v[XYZ(i, j - 1, k)]
 						+ w[XYZ(i, j, k + 1)]
 						- w[XYZ(i, j, k - 1)]
-						) / N;
+						) * invN;
 					p[XYZ(i, j, k)] = 0;
 				}
 			}
@@ -287,13 +287,30 @@ namespace particles {
 
 	float sampleDensity(FluidCube* fc, vec3 sample_pos) {
 		int N = fc->size; //If we want to scale the cube, maybe scale here by field-size/world-size
+		vec3 grid_size = fc->maxBound - fc->minBound;
+
+		//float weight[3];
+		//float density = 0;
+
+		vec3 local_position = (sample_pos - fc->minBound) / grid_size;
+		vec3 voxel_position = local_position * vec3(N);
+		//vec3 lattice_position = { voxel_position.x - 0.5, voxel_position.y - 0.5, voxel_position.z - 0.5 };
+
 		//recalculate from world coords to "density coords", maybe this can be done w/ some nice matrix instead
-		int x = floor(sample_pos.x - fc->minBound.x);
-		int y = floor(sample_pos.y - fc->minBound.y);
-		int z = floor(sample_pos.z - fc->minBound.z);
-		float density = fc->density[XYZ(x, y, z)];
-		//printf("Sampling fc-space (%d,%d,%d)\n", x, y, z);
-		//printf("Returning %f\n", density);
-		return density;
+		int x = (int)floor(voxel_position.x);
+		int y = (int)floor(voxel_position.y);
+		int z = (int)floor(voxel_position.z);
+		//Trilinear interpolation is this to much for my little cpu?
+		//for (int i = 0; i < 2; i++) {
+		//	weight[0] = 1 - abs(lattice_position.x - (x + i));
+		//	for (int j = 0; j < 2; i++) {
+		//		weight[1] = 1 - abs(lattice_position.y - (y + j));
+		//		for (int k = 0; k < 2; k++) {
+		//			weight[2] = 1 - abs(lattice_position.z - (z + k));
+		//			density += weight[0] * weight[1] * weight[2] * fc->density[XYZ(x + 1, y + j, z + k)];
+		//		}
+		//	}
+		//}
+		return fc->density[XYZ(x, y, z)];
 	}
 } //namespace particles

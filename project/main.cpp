@@ -32,8 +32,8 @@ using namespace glm;
 
 #define SIZE 32
 #define IMG_RES 64
-#define ABSORBTION 0.01f
-#define SCATTERING 0.01f
+#define ABSORBTION 0.01
+#define SCATTERING 0.01
 #define XY(i,j) ((i)+(N*j))
 #define XYZ(x,y,z) ((x) + (y) * N + (z) * N * N)
 
@@ -122,6 +122,12 @@ int dvel = 0; //Draw velocity or not, this is not implemented yet
 int grid_res = SIZE;
 int grid_size = (grid_res + 1) * (grid_res + 1);
 
+float light_x = 0;
+float light_y = 24;
+
+vec3 cameraPosition = { 0, 0, 0 };
+
+
 particles::FluidCube* fluidCube;
 glm::ivec3 emitterPos = { SIZE / 2, 4, SIZE / 2 };
 glm::vec3 emitterDir = { 0.0f, 0.5f, 0.f };
@@ -140,10 +146,19 @@ void loadShaders(bool is_reload)
 }
 
 void emitter_driver(particles::FluidCube* cube) {
-	particles::fcAddDensity(cube, emitterPos.x, emitterPos.y, emitterPos.z, 0.5f);
-	particles::fcAddDensity(cube, emitterPos.x + 1, emitterPos.y, emitterPos.z, 0.5f);
-	particles::fcAddDensity(cube, emitterPos.x, emitterPos.y + 1, emitterPos.z, 0.5f);
-	particles::fcAddDensity(cube, emitterPos.x + 1, emitterPos.y + 1, emitterPos.z, 0.5f);
+
+	for (int i = 0; i < 10; i++) {
+		particles::fcAddDensity(cube, emitterPos.x + i, emitterPos.y , emitterPos.z, 1.f);
+		particles::fcAddDensity(cube, emitterPos.x, emitterPos.y , emitterPos.z + i, 1.f);
+	}
+	//particles::fcAddDensity(cube, emitterPos.x, emitterPos.y, emitterPos.z, 0.8f);
+	//particles::fcAddDensity(cube, emitterPos.x + 1, emitterPos.y, emitterPos.z, 0.8f);
+	//particles::fcAddDensity(cube, emitterPos.x, emitterPos.y + 1, emitterPos.z, 0.8f);
+	//particles::fcAddDensity(cube, emitterPos.x + 1, emitterPos.y + 1, emitterPos.z, 0.8f);
+	//particles::fcAddDensity(cube, emitterPos.x, emitterPos.y, emitterPos.z, 0.8f);
+	//particles::fcAddDensity(cube, emitterPos.x + 1, emitterPos.y, emitterPos.z, 0.8f);
+	//particles::fcAddDensity(cube, emitterPos.x, emitterPos.y + 1, emitterPos.z, 0.8f);
+	//particles::fcAddDensity(cube, emitterPos.x + 1, emitterPos.y + 1, emitterPos.z, 0.8f);
 
 	particles::fcAddVelocity(cube, emitterPos.x, emitterPos.y, emitterPos.z, emitterDir.x, emitterDir.y, emitterDir.z);
 	particles::fcAddVelocity(cube, emitterPos.x + 1, emitterPos.y, emitterPos.z, emitterDir.x, emitterDir.y + 0.1f, emitterDir.z);
@@ -158,20 +173,8 @@ void emitter_driver(particles::FluidCube* cube) {
 static void draw_density(particles::FluidCube* fc, vec3* imgBuf, std::vector<ray> rayBuf)
 {	
 	int N = fc->size;
-	//vec3 bg_color = { 0.1f, 0.1f, 0.1f };
-	//vec3 vl_color = { 0.9, 0.5, 0.5 };
-	//for (int j = 1; j < N-1; j++) {
-	//	for (int i = 1; i < N-1; i++) {
-	//		float distance = 0; 
-	//			for (int k = 1; k < N-1; k++) { //Loop through all densities along "ray" (z-axis in this case)
-	//				distance += 1 * fc->density[XYZ(i, j, k)]; // IS -Z INTO OR OUT FROM SCREEN???
-	//		}
-	//		float result = exp(-distance * ABSORBTION); //Beers law??
-	//		imgBuf[XY(i,j)] = result * bg_color + (1-result) * vl_color; //Nått med att XY landar utanför arrayen verkar det som
-	//	}
-	//}
 
-	renderVolume(imgBuf, rayBuf, fc, vec3(0, 24, 0), vec3(0), IMG_RES, IMG_RES, 0);
+	renderVolume(imgBuf, rayBuf, fc, vec3(light_x, light_y, 5.f), cameraPosition, IMG_RES, IMG_RES, 0);
 
 	glBindTexture(GL_TEXTURE_2D, renderTexture);
 	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, IMG_RES, IMG_RES, GL_RGB, GL_FLOAT, imgBuf);
@@ -237,21 +240,47 @@ void initialize()
 	glEnable(GL_PROGRAM_POINT_SIZE);
 
 	///////////////////////////////////////////////////////////////////////////
-	//init simulation cube
+	//init simulation cube 
 	fluidCube = particles::fcCreate(SIZE, diff, visc, ABSORBTION, SCATTERING, dt);
-	particles::fcAddDensity(fluidCube, 15, 15, (SIZE / 2), 0.5f);
-	particles::fcAddDensity(fluidCube, 14, 11, (SIZE / 2), 0.5f);
-	particles::fcAddDensity(fluidCube, 14, 11, (SIZE / 2), 0.5f);
-	particles::fcAddDensity(fluidCube, 14, 12, (SIZE / 2), 0.5f);
-	particles::fcAddDensity(fluidCube, 12, 13, (SIZE / 2), 0.5f);
-	particles::fcAddDensity(fluidCube, 12, 14, (SIZE / 2), 0.5f);
-	particles::fcAddDensity(fluidCube, 11, 15, (SIZE / 2), 0.5f);
-	particles::fcAddDensity(fluidCube, 11, 16, (SIZE / 2), 0.5f);
+	
 	particles::fcAddVelocity(fluidCube, 1, 1, 1, -0.2f, 0.5f, 0.5f);
 	particles::fcAddVelocity(fluidCube, 2, 1, 1, 0.f, 0.5f, 0.5f);
 	particles::fcAddVelocity(fluidCube, 3, 1, 1, 0.2f, 0.5f, 0.5f);
 
-	
+	//Add some initial density
+	for (int z = 0; z < (fluidCube->size) / 2; z++) {
+		for (int y = 0; y < (fluidCube->size / 2); y++) {
+			for (int x = 0; x < fluidCube->size / 2; x++) {
+			particles::fcAddDensity(fluidCube, x + 8, y + 8, z + 8, 10.f);
+			}
+
+		}
+	}
+	//ivec3 density_cloud = { 3, SIZE - 6, SIZE - 6 };
+	//for (int z = 0; z < 4; z++) {
+	//	for (int y = 0; y < 4; y++) {
+	//		for (int x = 0; x < 4; x++) {
+	//			particles::fcAddDensity(fluidCube, density_cloud.x, density_cloud.y, density_cloud.z, 0.8f);
+	//		}
+	//	}
+	//}
+	//
+	//density_cloud = { SIZE - 10, SIZE - 16, SIZE / 2 };
+	//for (int z = 0; z < 6; z++) {
+	//	for (int y = 0; y < 6; y++) {
+	//		for (int x = 0; x < 6; x++) {
+	//			particles::fcAddDensity(fluidCube, density_cloud.x, density_cloud.y, density_cloud.z, 0.8f);
+	//		}
+	//	}
+	//}
+
+	//Add initial velocity
+	for (int z = 4; z < SIZE - 6 ; z += 4) {
+		particles::fcAddVelocity(fluidCube, SIZE / 2, z   , SIZE / 2, 1.f, 0.f, 0.f);
+		particles::fcAddVelocity(fluidCube, SIZE / 2, z+ 1, SIZE / 2, 0.f, 0.f, 1.f);
+		particles::fcAddVelocity(fluidCube, SIZE / 2, z+ 2, SIZE / 2, -1.f, 0.f, 0.f);
+		particles::fcAddVelocity(fluidCube, SIZE / 2, z+ 3, SIZE / 2, 0.f, 0.f, -1.f);
+	}
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -272,6 +301,14 @@ void display(void)
 	glClearColor(0.1f, 0.1f, 0.1f, 0.0);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	
+	//for (int z = 0; z < (fluidCube->size) / 2; z++) {
+	//	for (int x = 0; x < (fluidCube->size / 2); x++) {
+	//		particles::fcAddDensity(fluidCube, x + (fluidCube->size / 4), 5, z + (fluidCube->size / 4), 0.1f);
+	//		particles::fcAddDensity(fluidCube, x + (fluidCube->size / 4), 6, z + (fluidCube->size / 4), 0.1f);
+	//		particles::fcAddDensity(fluidCube, x + (fluidCube->size / 4), 7, z + (fluidCube->size / 4), 0.1f);
+	//	}
+	//}
+
 	emitter_driver(fluidCube);
 	draw_density(fluidCube, imageBuff, rayBuff);
 
@@ -323,7 +360,8 @@ bool handleEvents(void)
 			SDL_GetMouseState(&x, &y);
 			g_prevMouseCoords.x = x;
 			g_prevMouseCoords.y = y;
-			//dens[XY(x, y)] = source;
+			printf("Click (%d, %d)\n", x, 640 - y);
+
 		}
 
 		if (!(SDL_GetMouseState(NULL, NULL) & SDL_BUTTON(SDL_BUTTON_LEFT)))
@@ -334,15 +372,75 @@ bool handleEvents(void)
 		if (event.type == SDL_MOUSEMOTION && g_isMouseDragging)
 		{
 			//// More info at https://wiki.libsdl.org/SDL_MouseMotionEvent
-			//int delta_x = event.motion.x - g_prevMouseCoords.x;
-			//int delta_y = event.motion.y - g_prevMouseCoords.y;
+			int delta_x = event.motion.x - g_prevMouseCoords.x;
+			int delta_y = event.motion.y - g_prevMouseCoords.y;
 			//float rotationSpeed = 0.1f;
 			//mat4 yaw = rotate(rotationSpeed * deltaTime * -delta_x, worldUp);
 			//mat4 pitch = rotate(rotationSpeed * deltaTime * -delta_y,
 			//	normalize(cross(cameraDirection, worldUp)));
 			//cameraDirection = vec3(pitch * yaw * vec4(cameraDirection, 0.0f));
-			//g_prevMouseCoords.x = event.motion.x;
-			//g_prevMouseCoords.y = event.motion.y;
+			g_prevMouseCoords.x = event.motion.x;
+			g_prevMouseCoords.y = event.motion.y;
+			int x_view = g_prevMouseCoords.x;
+			int y_view = (640 - g_prevMouseCoords.y);
+
+			int x_grid = floor(SIZE * x_view / 640);
+			int y_grid = floor(SIZE * y_view / 640);
+
+			fcAddDensity(fluidCube, x_grid, y_grid, SIZE / 2, 1.f);
+			fcAddDensity(fluidCube, x_grid - 1 , y_grid, SIZE / 2, 1.f);
+			fcAddDensity(fluidCube, x_grid + 1, y_grid, SIZE / 2, 1.f);
+			fcAddDensity(fluidCube, x_grid, y_grid+1, SIZE / 2, 1.f);
+			fcAddDensity(fluidCube, x_grid, y_grid-1, SIZE / 2, 1.f);
+			fcAddDensity(fluidCube, x_grid, y_grid, SIZE / 2 + 1 , 1.f);
+			fcAddDensity(fluidCube, x_grid, y_grid, SIZE / 2 - 1 , 1.f);
+		}
+
+		if (event.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_RIGHT
+			&& (!labhelper::isGUIvisible() || !ImGui::GetIO().WantCaptureMouse))
+		{
+			g_isMouseDragging = true;
+			int x;
+			int y;
+			SDL_GetMouseState(&x, &y);
+			g_prevMouseCoords.x = x;
+			g_prevMouseCoords.y = y;
+			//printf("Click (%d, %d)\n", x, 640 - y);
+			
+			fcAddVelocity(fluidCube, SIZE / 2, SIZE / 2 + 1 ,SIZE / 2, 0, 10.f, 0.f);
+			fcAddVelocity(fluidCube, SIZE / 2, SIZE / 2 - 1, SIZE / 2, 0.f, -10.f, 0.f);
+			fcAddVelocity(fluidCube, SIZE / 2 + 1, SIZE / 2, SIZE / 2, 10.f, 0.f, 0.f);
+			fcAddVelocity(fluidCube, SIZE / 2 - 1, SIZE / 2, SIZE / 2, -10.f, 0.f, 0.f);
+			fcAddVelocity(fluidCube, SIZE / 2, SIZE / 2, SIZE / 2 + 1, 0.f, 0.f, 10.f);
+			fcAddVelocity(fluidCube, SIZE / 2, SIZE / 2, SIZE / 2 - 1, 0.f, 0.f, -5.f);
+
+
+			//int x_grid = floor(SIZE * x / 640);
+			//int y_grid = floor(SIZE * (640 - y) / 640);
+			//
+			//ray ray(vec3(x_grid, y_grid, 0), vec3(0, 0, -1));
+			//vec2 intersect = ray.rayAABB_intersect(fluidCube);
+			//printf("Shootin (%f,%f)\n", intersect.x, intersect.y);
+			//if (intersect != vec2(-1, -1)) {
+			//	int N = fluidCube->size;
+			//	float t = (intersect.y - intersect.x) / 2;
+			//	vec3 sample_pos = ray.origin + t * ray.dir;
+			//	vec3 grid_size = fluidCube->maxBound - fluidCube->minBound;
+			//
+			//	vec3 local_position = (sample_pos - fluidCube->minBound) / grid_size;
+			//	vec3 voxel_position = local_position * vec3(N);
+			//	//vec3 lattice_position = { voxel_position.x - 0.5, voxel_position.y - 0.5, voxel_position.z - 0.5 };
+			//
+			//	//recalculate from world coords to "density coords", maybe this can be done w/ some nice matrix instead
+			//	int x = (int)floor(voxel_position.x);
+			//	int y = (int)floor(voxel_position.y);
+			//	int z = (int)floor(voxel_position.z);
+			//	
+			//	fcAddVelocity(fluidCube, x, y, z, 1.f, 1.f, 1.f);
+			//	printf("velocity added at (%d,%d,%d)\n", x, y, z);
+			//}
+
+
 		}
 
 	}
@@ -360,8 +458,9 @@ void gui()
 	            ImGui::GetIO().Framerate);
 	// ----------------------------------------------------------
 
-	ImGui::SliderFloat("Diffusion", &diff, 0.0f, 1.0f);
-	ImGui::SliderFloat("Viscosity", &visc, 0.0f, 1.0f);
+	ImGui::SliderFloat("Camera X", &cameraPosition.x, -1, 1);
+	ImGui::SliderFloat("Light x", &light_x, -50.f, 50.0f);
+	ImGui::SliderFloat("Light y", &light_y, -50.f, 50.0f);
 	ImGui::SliderInt("Emitter x pos", &emitterPos.x, 1, SIZE - 1);
 	ImGui::SliderInt("Emitter y pos", &emitterPos.y, 1, SIZE - 1);
 	ImGui::SliderFloat("Emitter dir x ", &emitterDir.x, -1.f, 1.f);
