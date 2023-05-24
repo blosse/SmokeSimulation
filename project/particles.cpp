@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <GL/glew.h>
 #include <glm/glm.hpp>
+#include <glm/gtx/rotate_vector.hpp>
 #include <labhelper.h>
 #include <stdlib.h>
 
@@ -45,8 +46,9 @@ namespace particles {
 		cube->Vy0 = (float*) calloc(n, sizeof(float));
 		cube->Vz0 = (float*) calloc(size * size * size, sizeof(float));
 
-		cube->minBound = fvec3(-16, -16, -53);
-		cube->maxBound = fvec3(16, 16, - 21);
+		cube->position = vec3(0, 0, 0);
+		cube->minBound = fvec3(cube->position.x - size / 2, cube->position.y - size / 2, cube->position.z - size / 2);
+		cube->maxBound = fvec3(cube->position.x + size / 2, cube->position.y + size / 2, cube->position.z + size / 2);
 
 		return cube;
 	}
@@ -117,8 +119,14 @@ namespace particles {
 		cube->Vz[index] += amountZ;
 	}
 
+	void fcClearDensity(FluidCube* cube) {
+		for (int i = 0; i < cube->size * cube->size * cube->size; i++) {
+			cube->density[i] = 0;
+		}
+	}
+
+
 	//Exchange densities with neighboring cells. The smoke "leaks" into the neighboring cells
-	//TODO Figure out if x and x0 should just be arrays or if theres a fancier way to do it
 	//This is the Ash implementation, the original does (1+4*a) instead of * cReciprocal
 	//This is because the linear solve is broken out of the diffuse func from the paper
 	void lin_solve(int b, float* x, float* x0, float a, float c, int iter, int N) {
@@ -289,28 +297,14 @@ namespace particles {
 		int N = fc->size; //If we want to scale the cube, maybe scale here by field-size/world-size
 		vec3 grid_size = fc->maxBound - fc->minBound;
 
-		//float weight[3];
-		//float density = 0;
-
 		vec3 local_position = (sample_pos - fc->minBound) / grid_size;
 		vec3 voxel_position = local_position * vec3(N);
-		//vec3 lattice_position = { voxel_position.x - 0.5, voxel_position.y - 0.5, voxel_position.z - 0.5 };
 
 		//recalculate from world coords to "density coords", maybe this can be done w/ some nice matrix instead
 		int x = (int)floor(voxel_position.x);
 		int y = (int)floor(voxel_position.y);
 		int z = (int)floor(voxel_position.z);
-		//Trilinear interpolation is this to much for my little cpu?
-		//for (int i = 0; i < 2; i++) {
-		//	weight[0] = 1 - abs(lattice_position.x - (x + i));
-		//	for (int j = 0; j < 2; i++) {
-		//		weight[1] = 1 - abs(lattice_position.y - (y + j));
-		//		for (int k = 0; k < 2; k++) {
-		//			weight[2] = 1 - abs(lattice_position.z - (z + k));
-		//			density += weight[0] * weight[1] * weight[2] * fc->density[XYZ(x + 1, y + j, z + k)];
-		//		}
-		//	}
-		//}
+
 		return fc->density[XYZ(x, y, z)];
 	}
 } //namespace particles

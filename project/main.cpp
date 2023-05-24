@@ -24,6 +24,7 @@ extern "C" _declspec(dllexport) unsigned int NvOptimusEnablement = 0x00000001;
 
 #include <glm/glm.hpp>
 #include <glm/gtx/transform.hpp>
+#include <glm/gtx/rotate_vector.hpp>
 using namespace glm;
 
 #include <Model.h>
@@ -31,7 +32,7 @@ using namespace glm;
 #include "fbo.h"
 
 #define SIZE 32
-#define IMG_RES 64
+#define IMG_RES 128
 #define ABSORBTION 0.01
 #define SCATTERING 0.01
 #define XY(i,j) ((i)+(N*j))
@@ -40,10 +41,6 @@ using namespace glm;
 ///////////////////////////////////////////////////////////////////////////////
 /*
 TODOLIST
--Implement some draw_density type function
--Check out "marker and cell" grid (MAC grid)
--Extend solver to 3D
--Check out and possibly implement "vorticity confinement" 
 -Somehow implement collision detection, so that smoke can "wrap" around objects (voxelize objects)
 */
 
@@ -98,7 +95,11 @@ GLuint VBO;
 GLuint EBO;
 
 vec3 *imageBuff = new vec3[IMG_RES*IMG_RES];
-std::vector<ray> rayBuff;
+std::vector<ray> *rayBuff = new std::vector<ray>();
+
+camera cam(50.f, 0.f);
+float camDistance = 50.f;
+float camAngle = 0.f;
 
 float vertices[] = {
 	// positions          // colors           // texture coords
@@ -125,7 +126,11 @@ int grid_size = (grid_res + 1) * (grid_res + 1);
 float light_x = 0;
 float light_y = 24;
 
-vec3 cameraPosition = { 0, 0, 0 };
+vec3 cameraPosition = { 0, 0, 30 };
+
+vec2 prevCam = { 0, 0 };
+vec2 newCam = { 0, 30 }; //x = angle y = distance
+int camMoved = 1;
 
 
 particles::FluidCube* fluidCube;
@@ -148,17 +153,9 @@ void loadShaders(bool is_reload)
 void emitter_driver(particles::FluidCube* cube) {
 
 	for (int i = 0; i < 10; i++) {
-		particles::fcAddDensity(cube, emitterPos.x + i, emitterPos.y , emitterPos.z, 1.f);
-		particles::fcAddDensity(cube, emitterPos.x, emitterPos.y , emitterPos.z + i, 1.f);
+		particles::fcAddDensity(cube, emitterPos.x + i, emitterPos.y , emitterPos.z, 10.f);
+		particles::fcAddDensity(cube, emitterPos.x, emitterPos.y , emitterPos.z + i, 10.f);
 	}
-	//particles::fcAddDensity(cube, emitterPos.x, emitterPos.y, emitterPos.z, 0.8f);
-	//particles::fcAddDensity(cube, emitterPos.x + 1, emitterPos.y, emitterPos.z, 0.8f);
-	//particles::fcAddDensity(cube, emitterPos.x, emitterPos.y + 1, emitterPos.z, 0.8f);
-	//particles::fcAddDensity(cube, emitterPos.x + 1, emitterPos.y + 1, emitterPos.z, 0.8f);
-	//particles::fcAddDensity(cube, emitterPos.x, emitterPos.y, emitterPos.z, 0.8f);
-	//particles::fcAddDensity(cube, emitterPos.x + 1, emitterPos.y, emitterPos.z, 0.8f);
-	//particles::fcAddDensity(cube, emitterPos.x, emitterPos.y + 1, emitterPos.z, 0.8f);
-	//particles::fcAddDensity(cube, emitterPos.x + 1, emitterPos.y + 1, emitterPos.z, 0.8f);
 
 	particles::fcAddVelocity(cube, emitterPos.x, emitterPos.y, emitterPos.z, emitterDir.x, emitterDir.y, emitterDir.z);
 	particles::fcAddVelocity(cube, emitterPos.x + 1, emitterPos.y, emitterPos.z, emitterDir.x, emitterDir.y + 0.1f, emitterDir.z);
@@ -170,12 +167,13 @@ void emitter_driver(particles::FluidCube* cube) {
 	particles::fcAddVelocity(fluidCube, SIZE - 5, SIZE / 2 - 5, SIZE / 2 - 5 , -0.4f, -0.3f, 0.5f);
 }
 
-static void draw_density(particles::FluidCube* fc, vec3* imgBuf, std::vector<ray> rayBuf)
+static void draw_density(particles::FluidCube* fc, vec3* imgBuf, std::vector<ray> *rayBuf)
 {	
-	int N = fc->size;
-
-	renderVolume(imgBuf, rayBuf, fc, vec3(light_x, light_y, 5.f), cameraPosition, IMG_RES, IMG_RES, 0);
-
+	if (camMoved) {
+		cam.move(camAngle, camDistance);
+	}
+	renderVolume(imgBuf, rayBuf, fc, vec3(light_x, light_y, 5.f), cam, IMG_RES, IMG_RES, camMoved);
+	camMoved = 0;
 	glBindTexture(GL_TEXTURE_2D, renderTexture);
 	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, IMG_RES, IMG_RES, GL_RGB, GL_FLOAT, imgBuf);
 	//glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, N, N, 0, GL_RGB, GL_FLOAT, imgBuf);
@@ -248,14 +246,14 @@ void initialize()
 	particles::fcAddVelocity(fluidCube, 3, 1, 1, 0.2f, 0.5f, 0.5f);
 
 	//Add some initial density
-	for (int z = 0; z < (fluidCube->size) / 2; z++) {
-		for (int y = 0; y < (fluidCube->size / 2); y++) {
-			for (int x = 0; x < fluidCube->size / 2; x++) {
-			particles::fcAddDensity(fluidCube, x + 8, y + 8, z + 8, 10.f);
-			}
-
-		}
-	}
+	//for (int z = 0; z < (fluidCube->size) / 2; z++) {
+	//	for (int y = 0; y < (fluidCube->size / 2); y++) {
+	//		for (int x = 0; x < fluidCube->size / 2; x++) {
+	//		particles::fcAddDensity(fluidCube, x + 8, y + 8, z + 8, 10.f);
+	//		}
+	//
+	//	}
+	//}
 	//ivec3 density_cloud = { 3, SIZE - 6, SIZE - 6 };
 	//for (int z = 0; z < 4; z++) {
 	//	for (int y = 0; y < 4; y++) {
@@ -308,7 +306,6 @@ void display(void)
 	//		particles::fcAddDensity(fluidCube, x + (fluidCube->size / 4), 7, z + (fluidCube->size / 4), 0.1f);
 	//	}
 	//}
-
 	emitter_driver(fluidCube);
 	draw_density(fluidCube, imageBuff, rayBuff);
 
@@ -414,33 +411,6 @@ bool handleEvents(void)
 			fcAddVelocity(fluidCube, SIZE / 2, SIZE / 2, SIZE / 2 + 1, 0.f, 0.f, 10.f);
 			fcAddVelocity(fluidCube, SIZE / 2, SIZE / 2, SIZE / 2 - 1, 0.f, 0.f, -5.f);
 
-
-			//int x_grid = floor(SIZE * x / 640);
-			//int y_grid = floor(SIZE * (640 - y) / 640);
-			//
-			//ray ray(vec3(x_grid, y_grid, 0), vec3(0, 0, -1));
-			//vec2 intersect = ray.rayAABB_intersect(fluidCube);
-			//printf("Shootin (%f,%f)\n", intersect.x, intersect.y);
-			//if (intersect != vec2(-1, -1)) {
-			//	int N = fluidCube->size;
-			//	float t = (intersect.y - intersect.x) / 2;
-			//	vec3 sample_pos = ray.origin + t * ray.dir;
-			//	vec3 grid_size = fluidCube->maxBound - fluidCube->minBound;
-			//
-			//	vec3 local_position = (sample_pos - fluidCube->minBound) / grid_size;
-			//	vec3 voxel_position = local_position * vec3(N);
-			//	//vec3 lattice_position = { voxel_position.x - 0.5, voxel_position.y - 0.5, voxel_position.z - 0.5 };
-			//
-			//	//recalculate from world coords to "density coords", maybe this can be done w/ some nice matrix instead
-			//	int x = (int)floor(voxel_position.x);
-			//	int y = (int)floor(voxel_position.y);
-			//	int z = (int)floor(voxel_position.z);
-			//	
-			//	fcAddVelocity(fluidCube, x, y, z, 1.f, 1.f, 1.f);
-			//	printf("velocity added at (%d,%d,%d)\n", x, y, z);
-			//}
-
-
 		}
 
 	}
@@ -458,7 +428,15 @@ void gui()
 	            ImGui::GetIO().Framerate);
 	// ----------------------------------------------------------
 
-	ImGui::SliderFloat("Camera X", &cameraPosition.x, -1, 1);
+	if (ImGui::Button("Clear smoke")) {
+		fcClearDensity(fluidCube);
+	}
+	if (ImGui::SliderFloat("Camera Distance", &camDistance, 20, 80)) {
+		camMoved = 1;
+	}
+	if (ImGui::SliderFloat("Rotate Cube", &camAngle, -3.14, 3.14)) {
+		camMoved = 1;
+	}
 	ImGui::SliderFloat("Light x", &light_x, -50.f, 50.0f);
 	ImGui::SliderFloat("Light y", &light_y, -50.f, 50.0f);
 	ImGui::SliderInt("Emitter x pos", &emitterPos.x, 1, SIZE - 1);

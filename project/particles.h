@@ -30,6 +30,7 @@ namespace particles {
 		float* Vy0;
 		float* Vz0;
 
+		vec3 position;
 		fvec3 minBound;
 		fvec3 maxBound;
 	};
@@ -41,6 +42,7 @@ namespace particles {
 	void set_bnd(int b, float* x, int N);
 	void fcAddDensity(FluidCube* cube, int x, int y, int z, float amount);
 	void fcAddVelocity(FluidCube* cube, int x, int y, int z, float amountX, float amountY, float amountZ);
+	void fcClearDensity(FluidCube* cube);
 	float sampleDensity(FluidCube* fc, vec3 sample_pos);
 	void lin_solve(int b, float* x, float* x0, float a, float c, int iter, int N);
 	void diffuse(int b, float* x, float* x0, float diff, float dt, int iter, int N);

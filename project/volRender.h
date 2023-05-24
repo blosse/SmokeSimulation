@@ -6,6 +6,7 @@
 #include <glm/detail/type_vec3.hpp>
 #include <glm/mat4x4.hpp>
 #include <glm/gtx/transform.hpp>
+#include <glm/gtx/rotate_vector.hpp>
 #include <stdlib.h>
 #include "particles.h"
 #include <labhelper.h>
@@ -43,7 +44,6 @@ class ray {
 
 			//if ray intersects box that is behind us
 			if (t1 < 0) {
-				printf("Box behind!");
 				return vec2(-1, -1);
 			}
 
@@ -54,7 +54,6 @@ class ray {
 
 			//We are inside box
 			if (t0 < 0) {
-				printf("Inside box\n");
 				return vec2(0, t1);
 			}
 			//else we are intersecting the box
@@ -62,8 +61,8 @@ class ray {
 		}
 
 	vec3 traceRay(FluidCube* fc, vec3* imgBuf, vec3 lightPos) {
-		vec3 bg_color = { 1.f, 1.f, 0.95f };
-		vec3 light_color = {1.f, 1.f, 1.f};
+		vec3 bg_color = { 0.1f, 0.1f, 0.2f };
+		vec3 light_color = {5.f, 5.f, 5.f};
 		//float phase = 1 / 4 * 3.141; //Basic phase term for isotropic scattering, might implement henyey-greenstein if time
 		int N = fc->size;
 
@@ -125,42 +124,59 @@ class ray {
 	}
 };
 
-void renderVolume(vec3* renderBuffer, std::vector<ray> rayBuffer, FluidCube* fc, vec3 lightPos, vec3 cameraPos, int img_width, int img_height, int cameraMoved) {
+class camera {
+public:
+	float angle;
+	float radius;
+	mat4 viewMatrix;
+	vec3 position;
+	camera(float dist, float ang) {
+		angle = ang;
+		radius = dist;
+		position = vec3(sin(angle) * radius, 0.f, cos(angle) * radius);
+		viewMatrix = lookAt(position, vec3(0,0,0), vec3(0, 1, 0));
+	}
+
+	void move(float angle, float dist) {
+		this->angle = angle;
+		this->radius = dist;
+		float x = sin(angle) * radius;
+		float z = cos(angle) * radius;
+		this->position = vec3(x, 5.f, z);
+		this->viewMatrix = lookAt(this->position, vec3(0, 0, 0), vec3(0, 1, 0));
+	}
+};
+
+void renderVolume(vec3* renderBuffer, std::vector<ray> *rayBuffer, FluidCube* fc, vec3 lightPos, camera cam, int img_width, int img_height, int cameraMoved) {
 	int fov = 90;
 	float aspectRatio =(float) (img_width / img_height);
 	int N = img_height;
 	
-	mat4 viewMatrix = glm::lookAt(cameraPos, vec3(0, 0, -1), vec3(0.f, 1.f, 0.f));
+	mat4 viewMatrix = cam.viewMatrix;
 	mat4 inverseView = inverse(viewMatrix);
 
-	//mat4 projection = perspectiveFov(radians(fov), (float)img_width, (float)img_height,  -1.f, INFINITY);
-
 	float scale = tan(radians(fov * 0.5)); //?
-	vec3 origin;
 	
-	if (cameraMoved == 1 || rayBuffer.size() == 0) {
+	if (cameraMoved) {
+		rayBuffer->clear();
 		for (int y = 0; y < img_height; y++) {
 			for (int x = 0; x < img_width; x++) {
 				float px = ((2 * ((x + 0.5) / img_width)) - 1) * aspectRatio * scale;
 				float py = ((2 * ((y + 0.5) / img_height)) - 1) * scale;
 
-				//This is in camera-space rn
-				//We are going to need inverse(lookAt(...)) here (inverse viewmatrix)
-				//Might be good idea to store (cache) all ray directions before tracing, so we only have to recalc them when cam moves, might give speed up. 
-
-				vec3 rayOrigin = { 0, 0, 0 };
-				vec3 rayTargetWorld = inverseView * vec4(px, py, -1, 0);
-				vec3 rayDir = normalize(rayTargetWorld);
-
+				vec3 rayOrigin = cam.position;
+				vec3 rayTargetWorld = inverseView * vec4(px, py, -1, 1);
+				vec3 rayDir = normalize(rayTargetWorld - rayOrigin);
+				
 				ray ray(rayOrigin, rayDir);
-				rayBuffer.push_back(ray);
+				rayBuffer->push_back(ray);
 			}
 		}
 	}
 	//Looping over all pixels in output image
 	for (int i = 0; i < img_width * img_height; i++) {
-		renderBuffer[i] = rayBuffer[i].traceRay(fc, renderBuffer, lightPos);
+		renderBuffer[i] = rayBuffer->at(i).traceRay(fc, renderBuffer, lightPos);
 	}
-
 }
+
 
