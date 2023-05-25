@@ -11,10 +11,9 @@ using namespace std;
 using namespace labhelper;
 
 /*
-Most code is borrowed from either:
+Most code is borrowed from
 Real-Time Fluid Dynamics for Games by Jos Stam
-or
-https://mikeash.com/pyblog/fluid-simulation-for-dummies.html (Which is an implementation of the paper by Stam)
+and extended into 3D
 */
 
 #define XYZ(x,y,z) ((x) + (y) * N + (z) * N * N)
@@ -35,7 +34,7 @@ namespace particles {
 		cube->absorbtion = absorbtion;
 		cube->scattering = scattering;
 
-		cube->s	= (float*) calloc(n, sizeof(float)); //== dens_prev?
+		cube->s	= (float*) calloc(n, sizeof(float));
 		cube->density = (float*)calloc(n, sizeof(float));
 
 		cube->Vx = (float*) calloc(n, sizeof(float));
@@ -130,7 +129,7 @@ namespace particles {
 	//This is the Ash implementation, the original does (1+4*a) instead of * cReciprocal
 	//This is because the linear solve is broken out of the diffuse func from the paper
 	void lin_solve(int b, float* x, float* x0, float a, float c, int iter, int N) {
-		float cRecip = 1.0 / c;
+		float invc = 1.0 / c;
 		for (int k = 0; k < iter; k++) {
 			for (int m = 1; m < N - 1; m++) {
 				for (int j = 1; j < N - 1; j++) {
@@ -143,7 +142,7 @@ namespace particles {
 									+ x[XYZ(i, j - 1, m)]
 									+ x[XYZ(i, j, m + 1)]
 									+ x[XYZ(i, j, m - 1)])
-									) * cRecip;
+									) * invc;
 					}
 				}
 			}
