@@ -21,6 +21,43 @@ using namespace particles;
 
 #define MT
 
+class camera {
+public:
+	float angle;
+	float radius;
+	mat4 viewMatrix;
+	vec3 position;
+	camera(float dist, float ang) {
+		angle = ang;
+		radius = dist;
+		position = vec3(sin(angle) * radius, 0.f, cos(angle) * radius);
+		viewMatrix = lookAt(position, vec3(0,0,0), vec3(0, 1, 0));
+	}
+
+	void move(float angle, float dist) {
+		this->angle = angle;
+		this->radius = dist;
+		float x = sin(angle) * radius;
+		float z = cos(angle) * radius;
+		this->position = vec3(x, 5.f, z);
+		this->viewMatrix = lookAt(this->position, vec3(0, 0, 0), vec3(0, 1, 0));
+	}
+};
+
+class sphere {
+public:
+	vec3 position;
+	float radius;
+	float radius2;
+	vec3 color;
+	sphere(vec3 pos, float r, vec3 col) {
+		position = pos;
+		radius = r;
+		color = col;
+		radius2 = r * r;
+	}
+};
+
 class ray {
 	public:
 		vec3 origin;
@@ -60,19 +97,44 @@ class ray {
 			return vec2(t0, t1);
 		}
 
-	vec3 traceRay(FluidCube* fc, vec3* imgBuf, vec3 lightPos) {
-		vec3 bg_color = { 0.1f, 0.1f, 0.2f };
-		vec3 light_color = {5.f, 5.f, 5.f};
+
+	//Geometric intersection test of ray and sphere
+	vec2 raySphereIntersect(sphere sph) {
+		vec3 L = sph.position - this->origin; //Vector from center of sphere to ray origin
+		float t_proj = dot(L, this->dir); //
+		if (t_proj < 0) { 
+			return vec2(-1, -1); //Sphere is behind ray origin
+		} 
+		float d2 = dot(L, L) - (t_proj * t_proj);
+		if (d2 > sph.radius) { 
+			return vec2(-1, -1); 
+		}
+		float t_halfcircle = sqrt(sph.radius2 - d2);
+		return vec2(t_proj - t_halfcircle, t_proj + t_halfcircle);
+	}
+	vec3 traceRay(FluidCube* fc, vec3* imgBuf, sphere lightPos) {
+		vec3 bg_color = { 0.1f, 0.1f, 0.15f };
 		//float phase = 1 / 4 * 3.141; //Basic phase term for isotropic scattering, might implement henyey-greenstein if time
 		int N = fc->size;
 
+		//If ray hits light source, set bg color to color of light
+		vec2 intersect_sphere = raySphereIntersect(lightPos);
+		if (intersect_sphere != vec2(-1, -1)) {
+			bg_color = lightPos.color;
+		}
+		//If the ray misses, return background color
 		vec2 intersect = rayAABB_intersect(fc);
 		if (intersect == vec2(-1, -1)) {
-			return bg_color; //If the ray misses, just return background color
+			return bg_color;
 		}
+		//If light source is in front of density grid, return light color
+		if ((intersect.x > intersect_sphere.y) && (intersect_sphere.x > -1.f))  {
+			return lightPos.color;
+		}
+
 		float march_dist = intersect.y - intersect.x; //Distance the ray travels inside volume
-		float step_size = 1;
-		float step_size_light = step_size + 1.f;
+		float step_size = 1.f;
+		float step_size_light = step_size;
 		int num_samples = (int) ceil(march_dist / step_size); //Maybe rethink how many samples we want, this should give 1 sample per distance unit
 		float stride = march_dist / num_samples;
 		
@@ -81,7 +143,7 @@ class ray {
 
 		for (int n = 0; n < num_samples; n++) {
 			//Sampling along primary ray
-			float t = intersect.x + stride + (0.5f * n); //Find middle of sample -> 0.5*n
+			float t = intersect.x + stride * (0.5f + n); //Find middle of sample -> 0.5*n
 			vec3 sample_pos = this->origin + t * this->dir;
 			float density_sample = sampleDensity(fc, sample_pos); //Should this be 1-? Maybe rethink how density works
 			
@@ -91,11 +153,10 @@ class ray {
 			transparency *= sample_attn;
 			if(transparency < 0.01) break; //if transparency is too low, no point in continuing calcs
 
-			//Sample along light ray
-			vec3 light_dir = normalize((sample_pos - lightPos)); //direction from position of light to sample position
-			ray light_ray(lightPos, light_dir);
+			//Calculate light ray from sample point and check intersection
+			vec3 light_dir = normalize((sample_pos - lightPos.position)); //direction from position of light to sample position
+			ray light_ray(lightPos.position, light_dir);
 			vec2 light_intersect = light_ray.rayAABB_intersect(fc);
-		
 
 			//In-scattering, we are getting fancy now
 			//Check if light ray intersects the box and if the density of the sample is greater than 0
@@ -104,50 +165,27 @@ class ray {
 				float stride_light = (light_intersect.y - light_intersect.x) / num_samples_light;
 				float tau = 0; //Accumulated transmission
 				for (int nl = 0; nl < num_samples_light-1; nl++) {
-					float t_light = light_intersect.x + stride_light * (nl + 0.5);
-					vec3 sample_pos_light = lightPos + t_light * light_dir;
+					float t_light = light_intersect.x + stride_light * (nl + 0.5f);
+					vec3 sample_pos_light = lightPos.position + t_light * light_dir;
 					tau += sampleDensity(fc, sample_pos_light);
 				}
-				//printf("tau = %f\n", tau);
 				float light_attn = exp(-tau * (fc->absorbtion + fc->scattering) * stride_light);
-				result += light_color     //Light color
+				result += lightPos.color     //Light color
 						* light_attn      //Transmission value of light ray
 						* (1.f / 4.f * 3.14f) //Phase function very simple rn
 						* fc->scattering  //Scattering coefficient
 						* transparency    //Transmission of prime ray
 						* stride //Can be thought of as dx in a riemann sum
 						* density_sample; //Density at sample location along light ray
-
 			}
 		}
 		return bg_color * transparency + result;
 	}
 };
 
-class camera {
-public:
-	float angle;
-	float radius;
-	mat4 viewMatrix;
-	vec3 position;
-	camera(float dist, float ang) {
-		angle = ang;
-		radius = dist;
-		position = vec3(sin(angle) * radius, 0.f, cos(angle) * radius);
-		viewMatrix = lookAt(position, vec3(0,0,0), vec3(0, 1, 0));
-	}
 
-	void move(float angle, float dist) {
-		this->angle = angle;
-		this->radius = dist;
-		float x = sin(angle) * radius;
-		float z = cos(angle) * radius;
-		this->position = vec3(x, 5.f, z);
-		this->viewMatrix = lookAt(this->position, vec3(0, 0, 0), vec3(0, 1, 0));
-	}
-};
 
-void renderVolume(vec3* renderBuffer, std::vector<ray> *rayBuffer, FluidCube* fc, vec3 lightPos, camera cam, int img_width, int img_height, int cameraMoved) {
+void renderVolume(vec3* renderBuffer, std::vector<ray> *rayBuffer, FluidCube* fc, sphere lightPos, camera cam, int img_width, int img_height, int cameraMoved) {
 	int fov = 90;
 	float aspectRatio =(float) (img_width / img_height);
 	int N = img_height;

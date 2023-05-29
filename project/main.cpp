@@ -32,18 +32,16 @@ using namespace glm;
 #include "fbo.h"
 
 #define SIZE 32
-#define IMG_RES 128
-#define ABSORBTION 0.01
+#define IMG_RES 128 // 128
+
+#define ABSORBTION 0.005
 #define SCATTERING 0.01
+#define VISCOSITY 0.5f
+#define DIFFUSION 0.5f
+float dt = 0.1f;
+
 #define XY(i,j) ((i)+(N*j))
 #define XYZ(x,y,z) ((x) + (y) * N + (z) * N * N)
-
-///////////////////////////////////////////////////////////////////////////////
-/*
-TODOLIST
--Somehow implement collision detection, so that smoke can "wrap" around objects (voxelize objects)
-*/
-
 
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -70,19 +68,7 @@ GLuint shaderProgram; // Shader used to draw the shadow map
 ///////////////////////////////////////////////////////////////////////////////
 // Test globals
 ///////////////////////////////////////////////////////////////////////////////
-GLuint cubeVAO;
-GLuint positionBuffer;
-GLuint colorBuffer;
-GLuint indexBuffer;
-GLuint pointBuffer;
 
-glm::vec3 g_triangleColor = { 1, 1, 1 };
-glm::vec3 g_pointPosition = { 0, 0, 0 };
-
-//std::vector<glm::vec3> vertices;
-//std::vector<glm::uvec3> indices;
-std::vector<glm::vec3> colors;
-std::vector<glm::vec3> points;
 
 //////////////////////////////////////////////////////////////////////////////
 // Stuff for the volumetric rendering
@@ -100,6 +86,10 @@ std::vector<ray> *rayBuff = new std::vector<ray>();
 camera cam(50.f, 0.f);
 float camDistance = 50.f;
 float camAngle = 0.f;
+int camMoved = 1;
+
+sphere light(vec3(0, 5, -32), 4, vec3(4,4, 4));
+float light_x = 0;
 
 float vertices[] = {
 	// positions          // colors           // texture coords
@@ -114,28 +104,11 @@ unsigned int indices[] = {
 	1, 2, 3
 };
 
-//Default values, maybe implement some way to change via GUI
-//int N = 9;
-float dt = 0.1f, diff = 0.5f, visc = 0.5f;
-float force = 5.0f, source = 100.0f;
-int dvel = 0; //Draw velocity or not, this is not implemented yet
-
-int grid_res = SIZE;
-int grid_size = (grid_res + 1) * (grid_res + 1);
-
-float light_x = 0;
-float light_y = 24;
-
-vec3 cameraPosition = { 0, 0, 30 };
-
-vec2 prevCam = { 0, 0 };
-vec2 newCam = { 0, 30 }; //x = angle y = distance
-int camMoved = 1;
-
-
 particles::FluidCube* fluidCube;
+
 glm::ivec3 emitterPos = { SIZE / 2, 4, SIZE / 2 };
-glm::vec3 emitterDir = { 0.0f, 0.5f, 0.f };
+glm::vec3 emitterDir = { 0.0f, 0.2f, 0.f };
+bool emitSmoke = false;
 
 ///////////////////////////////////////////////////////////////////////////////
 // Models
@@ -163,8 +136,14 @@ void emitter_driver(particles::FluidCube* cube) {
 	particles::fcAddVelocity(cube, emitterPos.x + 1, emitterPos.y + 1, emitterPos.z, emitterDir.x, emitterDir.y - 0.1f, emitterDir.z);
 
 	
-	particles::fcAddVelocity(fluidCube, 2, SIZE / 2, SIZE / 2, 0.5f, 0.01f, 0.5f);
-	particles::fcAddVelocity(fluidCube, SIZE - 5, SIZE / 2 - 5, SIZE / 2 - 5 , -0.4f, -0.3f, 0.5f);
+	//particles::fcAddVelocity(fluidCube, 2, SIZE / 2, SIZE / 2, 0.5f, 0.01f, 0.5f);
+	//particles::fcAddVelocity(fluidCube, SIZE - 5, SIZE / 2 - 5, SIZE / 2 - 5 , -0.4f, -0.3f, 0.5f);
+}
+
+void rotateLight(float angle) {
+	float x = sin(angle) * -32;
+	float z = cos(angle) * -32;
+	light.position = vec3(x, 5, z);
 }
 
 static void draw_density(particles::FluidCube* fc, vec3* imgBuf, std::vector<ray> *rayBuf)
@@ -172,7 +151,7 @@ static void draw_density(particles::FluidCube* fc, vec3* imgBuf, std::vector<ray
 	if (camMoved) {
 		cam.move(camAngle, camDistance);
 	}
-	renderVolume(imgBuf, rayBuf, fc, vec3(light_x, light_y, 5.f), cam, IMG_RES, IMG_RES, camMoved);
+	renderVolume(imgBuf, rayBuf, fc, light, cam, IMG_RES, IMG_RES, camMoved);
 	camMoved = 0;
 	glBindTexture(GL_TEXTURE_2D, renderTexture);
 	glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, IMG_RES, IMG_RES, GL_RGB, GL_FLOAT, imgBuf);
@@ -180,10 +159,6 @@ static void draw_density(particles::FluidCube* fc, vec3* imgBuf, std::vector<ray
 	glBindTexture(GL_TEXTURE_2D, 0);
 	
 }
-
-//vec3 insane_ray_trace(float* densityField, int size, vec3 rayOrigin, vec3 rayDir) {
-//	
-//}
 
 
 
@@ -199,7 +174,6 @@ void initialize()
 		imageBuff[i].x = 0.1f;
 		imageBuff[i].y = 0.1f;
 		imageBuff[i].z = 0.1f;
-		//imageBuff[i].w = 1.f;
 	}
 
 	///////////////////////////////////////////////////////////////////////
@@ -239,38 +213,11 @@ void initialize()
 
 	///////////////////////////////////////////////////////////////////////////
 	//init simulation cube 
-	fluidCube = particles::fcCreate(SIZE, diff, visc, ABSORBTION, SCATTERING, dt);
+	fluidCube = particles::fcCreate(SIZE, DIFFUSION, VISCOSITY, ABSORBTION, SCATTERING, dt);
 	
 	particles::fcAddVelocity(fluidCube, 1, 1, 1, -0.2f, 0.5f, 0.5f);
 	particles::fcAddVelocity(fluidCube, 2, 1, 1, 0.f, 0.5f, 0.5f);
 	particles::fcAddVelocity(fluidCube, 3, 1, 1, 0.2f, 0.5f, 0.5f);
-
-	//Add some initial density
-	//for (int z = 0; z < (fluidCube->size) / 2; z++) {
-	//	for (int y = 0; y < (fluidCube->size / 2); y++) {
-	//		for (int x = 0; x < fluidCube->size / 2; x++) {
-	//		particles::fcAddDensity(fluidCube, x + 8, y + 8, z + 8, 10.f);
-	//		}
-	//
-	//	}
-	//}
-	//ivec3 density_cloud = { 3, SIZE - 6, SIZE - 6 };
-	//for (int z = 0; z < 4; z++) {
-	//	for (int y = 0; y < 4; y++) {
-	//		for (int x = 0; x < 4; x++) {
-	//			particles::fcAddDensity(fluidCube, density_cloud.x, density_cloud.y, density_cloud.z, 0.8f);
-	//		}
-	//	}
-	//}
-	//
-	//density_cloud = { SIZE - 10, SIZE - 16, SIZE / 2 };
-	//for (int z = 0; z < 6; z++) {
-	//	for (int y = 0; y < 6; y++) {
-	//		for (int x = 0; x < 6; x++) {
-	//			particles::fcAddDensity(fluidCube, density_cloud.x, density_cloud.y, density_cloud.z, 0.8f);
-	//		}
-	//	}
-	//}
 
 	//Add initial velocity
 	for (int z = 4; z < SIZE - 6 ; z += 4) {
@@ -299,22 +246,14 @@ void display(void)
 	glClearColor(0.1f, 0.1f, 0.1f, 0.0);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	
-	//for (int z = 0; z < (fluidCube->size) / 2; z++) {
-	//	for (int x = 0; x < (fluidCube->size / 2); x++) {
-	//		particles::fcAddDensity(fluidCube, x + (fluidCube->size / 4), 5, z + (fluidCube->size / 4), 0.1f);
-	//		particles::fcAddDensity(fluidCube, x + (fluidCube->size / 4), 6, z + (fluidCube->size / 4), 0.1f);
-	//		particles::fcAddDensity(fluidCube, x + (fluidCube->size / 4), 7, z + (fluidCube->size / 4), 0.1f);
-	//	}
-	//}
-	emitter_driver(fluidCube);
+	if (emitSmoke) { emitter_driver(fluidCube); }
 	draw_density(fluidCube, imageBuff, rayBuff);
 
 	glUseProgram(shaderProgram);
 
 	glBindTexture(GL_TEXTURE_2D, renderTexture);
 	glBindVertexArray(VAO);
-	//labhelper::setUniformSlow(shaderProgram, "color_uni", glm::vec3(0.1,0.1,0.3));
-	//glDrawArrays(GL_TRIANGLES, 0, 6 * SIZE * SIZE);
+
 	glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
 
 	glUseProgram(0);
@@ -357,7 +296,6 @@ bool handleEvents(void)
 			SDL_GetMouseState(&x, &y);
 			g_prevMouseCoords.x = x;
 			g_prevMouseCoords.y = y;
-			printf("Click (%d, %d)\n", x, 640 - y);
 
 		}
 
@@ -380,17 +318,8 @@ bool handleEvents(void)
 			g_prevMouseCoords.y = event.motion.y;
 			int x_view = g_prevMouseCoords.x;
 			int y_view = (640 - g_prevMouseCoords.y);
-
-			int x_grid = floor(SIZE * x_view / 640);
-			int y_grid = floor(SIZE * y_view / 640);
-
-			fcAddDensity(fluidCube, x_grid, y_grid, SIZE / 2, 1.f);
-			fcAddDensity(fluidCube, x_grid - 1 , y_grid, SIZE / 2, 1.f);
-			fcAddDensity(fluidCube, x_grid + 1, y_grid, SIZE / 2, 1.f);
-			fcAddDensity(fluidCube, x_grid, y_grid+1, SIZE / 2, 1.f);
-			fcAddDensity(fluidCube, x_grid, y_grid-1, SIZE / 2, 1.f);
-			fcAddDensity(fluidCube, x_grid, y_grid, SIZE / 2 + 1 , 1.f);
-			fcAddDensity(fluidCube, x_grid, y_grid, SIZE / 2 - 1 , 1.f);
+			camAngle -= delta_x / 150.f;
+			camMoved = 1;
 		}
 
 		if (event.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_RIGHT
@@ -431,14 +360,13 @@ void gui()
 	if (ImGui::Button("Clear smoke")) {
 		fcClearDensity(fluidCube);
 	}
+	ImGui::Checkbox("Smoke Emitter", &emitSmoke);
 	if (ImGui::SliderFloat("Camera Distance", &camDistance, 20, 80)) {
 		camMoved = 1;
 	}
-	if (ImGui::SliderFloat("Rotate Cube", &camAngle, -3.14, 3.14)) {
-		camMoved = 1;
+	if (ImGui::SliderFloat("Rotate Light", &light_x, -3.14f, 3.14f)) {
+		rotateLight(light_x);
 	}
-	ImGui::SliderFloat("Light x", &light_x, -50.f, 50.0f);
-	ImGui::SliderFloat("Light y", &light_y, -50.f, 50.0f);
 	ImGui::SliderInt("Emitter x pos", &emitterPos.x, 1, SIZE - 1);
 	ImGui::SliderInt("Emitter y pos", &emitterPos.y, 1, SIZE - 1);
 	ImGui::SliderFloat("Emitter dir x ", &emitterDir.x, -1.f, 1.f);

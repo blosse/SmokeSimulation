@@ -70,9 +70,8 @@ namespace particles {
 
 	//"horizontal component of the velocity should be zero on the vertical walls, while the vertical component of
 	//the velocity should be zero on the horizontal walls"
-	//This is straight from the paper, mikeash's code is somewhat different, might use that when moving to 3D
 	void set_bnd(int b, float* x, int N) {
-		for (int j = 1; j < N - 1; j++) { //TODO kolla om detta verkligen behöver göras i separata loopar
+		for (int j = 1; j < N - 1; j++) {
 			for (int i = 1; i < N - 1; i++) {
 				x[XYZ(i, j, 0)] = b == 3 ? -x[XYZ(i, j, 1)] : x[XYZ(i, j, 1)];
 				x[XYZ(i, j, N - 1)] = b == 3 ? -x[XYZ(i, j, N - 2)] : x[XYZ(i, j, N - 2)];
@@ -126,8 +125,6 @@ namespace particles {
 
 
 	//Exchange densities with neighboring cells. The smoke "leaks" into the neighboring cells
-	//This is the Ash implementation, the original does (1+4*a) instead of * cReciprocal
-	//This is because the linear solve is broken out of the diffuse func from the paper
 	void lin_solve(int b, float* x, float* x0, float a, float c, int iter, int N) {
 		float invc = 1.0 / c;
 		for (int k = 0; k < iter; k++) {
@@ -273,7 +270,7 @@ namespace particles {
 		float* Vx0 = cube->Vx0;
 		float* Vy0 = cube->Vy0;
 		float* Vz0 = cube->Vz0;
-		float* s = cube->s; //I wonder what this represents? Seems like it's just empty. Replaces the swap step from original impl somehow
+		float* s = cube->s;
 		float* density = cube->density;
 
 		diffuse(1, Vx0, Vx, visc, dt, 4, N); //Default is 4 iterations
@@ -293,16 +290,18 @@ namespace particles {
 	}
 
 	float sampleDensity(FluidCube* fc, vec3 sample_pos) {
-		int N = fc->size; //If we want to scale the cube, maybe scale here by field-size/world-size
-		vec3 grid_size = fc->maxBound - fc->minBound;
+		int N = fc->size;
 
-		vec3 local_position = (sample_pos - fc->minBound) / grid_size;
-		vec3 voxel_position = local_position * vec3(N);
+		vec3 voxel_position = (sample_pos - fc->minBound);
 
 		//recalculate from world coords to "density coords", maybe this can be done w/ some nice matrix instead
 		int x = (int)floor(voxel_position.x);
 		int y = (int)floor(voxel_position.y);
 		int z = (int)floor(voxel_position.z);
+
+		if ((x == 0) || (y == 0) || (z == 0) || (x == N) || (y == N) || (z == N)) {
+			return 0;
+		}
 
 		return fc->density[XYZ(x, y, z)];
 	}
