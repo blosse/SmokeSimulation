@@ -97,7 +97,6 @@ class ray {
 			return vec2(t0, t1);
 		}
 
-
 	//Geometric intersection test of ray and sphere
 	vec2 raySphereIntersect(sphere sph) {
 		vec3 L = sph.position - this->origin; //Vector from center of sphere to ray origin
@@ -112,6 +111,12 @@ class ray {
 		float t_halfcircle = sqrt(sph.radius2 - d2);
 		return vec2(t_proj - t_halfcircle, t_proj + t_halfcircle);
 	}
+
+	//Generate jitter [-0.1, 0.1]
+	float jitter() {
+		return ((rand() / RAND_MAX) * 0.4f) - 0.2f;
+	}
+
 	vec3 traceRay(FluidCube* fc, vec3* imgBuf, sphere lightPos) {
 		vec3 bg_color = { 0.1f, 0.1f, 0.15f };
 		//float phase = 1 / 4 * 3.141; //Basic phase term for isotropic scattering, might implement henyey-greenstein if time
@@ -133,7 +138,7 @@ class ray {
 		}
 
 		float march_dist = intersect.y - intersect.x; //Distance the ray travels inside volume
-		float step_size = 1.f;
+		float step_size = 1.f; //Change sampling frequency here, large performance hit if lowered
 		float step_size_light = step_size;
 		int num_samples = (int) ceil(march_dist / step_size); //Maybe rethink how many samples we want, this should give 1 sample per distance unit
 		float stride = march_dist / num_samples;
@@ -143,7 +148,7 @@ class ray {
 
 		for (int n = 0; n < num_samples; n++) {
 			//Sampling along primary ray
-			float t = intersect.x + stride * (0.5f + n); //Find middle of sample -> 0.5*n
+			float t = intersect.x + stride * (0.5f + n /*+ jitter()*/); //Find middle of sample -> 0.5*n, Jitter slows it down alot
 			vec3 sample_pos = this->origin + t * this->dir;
 			float density_sample = sampleDensity(fc, sample_pos); //Should this be 1-? Maybe rethink how density works
 			
@@ -165,7 +170,7 @@ class ray {
 				float stride_light = (light_intersect.y - light_intersect.x) / num_samples_light;
 				float tau = 0; //Accumulated transmission
 				for (int nl = 0; nl < num_samples_light-1; nl++) {
-					float t_light = light_intersect.x + stride_light * (nl + 0.5f);
+					float t_light = light_intersect.x + stride_light * (nl + 0.5f  /*+ jitter()*/);
 					vec3 sample_pos_light = lightPos.position + t_light * light_dir;
 					tau += sampleDensity(fc, sample_pos_light);
 				}
@@ -175,7 +180,7 @@ class ray {
 						* (1.f / 4.f * 3.14f) //Phase function very simple rn
 						* fc->scattering  //Scattering coefficient
 						* transparency    //Transmission of prime ray
-						* stride //Can be thought of as dx in a riemann sum
+						* stride          //Step size can be thought of as dx in a riemann sum
 						* density_sample; //Density at sample location along light ray
 			}
 		}

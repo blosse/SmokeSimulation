@@ -35,7 +35,7 @@ using namespace glm;
 #define IMG_RES 128 // 128
 
 #define ABSORBTION 0.005
-#define SCATTERING 0.01
+#define SCATTERING 0.02
 #define VISCOSITY 0.5f
 #define DIFFUSION 0.5f
 float dt = 0.1f;
@@ -58,6 +58,7 @@ float deltaTime = 0.0f;
 //Mouse input
 ivec2 g_prevMouseCoords = { -1, -1 };
 bool g_isMouseDragging = false;
+bool g_isRightMouseDragging = false;
 
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -87,6 +88,7 @@ camera cam(50.f, 0.f);
 float camDistance = 50.f;
 float camAngle = 0.f;
 int camMoved = 1;
+int prevPuff = 0;
 
 sphere light(vec3(0, 5, -32), 4, vec3(4,4, 4));
 float light_x = 0;
@@ -106,9 +108,11 @@ unsigned int indices[] = {
 
 particles::FluidCube* fluidCube;
 
-glm::ivec3 emitterPos = { SIZE / 2, 4, SIZE / 2 };
-glm::vec3 emitterDir = { 0.0f, 0.2f, 0.f };
+glm::ivec3 emitterPos = { SIZE / 2, 2, SIZE / 2 };
+glm::vec3 emitterDir = { 0.0f, 0.1f, 0.f };
 bool emitSmoke = false;
+bool wind = false;
+bool puffs = false;
 
 ///////////////////////////////////////////////////////////////////////////////
 // Models
@@ -125,9 +129,9 @@ void loadShaders(bool is_reload)
 
 void emitter_driver(particles::FluidCube* cube) {
 
-	for (int i = 0; i < 10; i++) {
-		particles::fcAddDensity(cube, emitterPos.x + i, emitterPos.y , emitterPos.z, 10.f);
-		particles::fcAddDensity(cube, emitterPos.x, emitterPos.y , emitterPos.z + i, 10.f);
+	for (int i = 0; i < 2; i++) {
+		particles::fcAddDensity(cube, emitterPos.x + i, emitterPos.y , emitterPos.z, 18.f);
+		particles::fcAddDensity(cube, emitterPos.x, emitterPos.y , emitterPos.z + i, 18.f);
 	}
 
 	particles::fcAddVelocity(cube, emitterPos.x, emitterPos.y, emitterPos.z, emitterDir.x, emitterDir.y, emitterDir.z);
@@ -136,8 +140,70 @@ void emitter_driver(particles::FluidCube* cube) {
 	particles::fcAddVelocity(cube, emitterPos.x + 1, emitterPos.y + 1, emitterPos.z, emitterDir.x, emitterDir.y - 0.1f, emitterDir.z);
 
 	
-	//particles::fcAddVelocity(fluidCube, 2, SIZE / 2, SIZE / 2, 0.5f, 0.01f, 0.5f);
-	//particles::fcAddVelocity(fluidCube, SIZE - 5, SIZE / 2 - 5, SIZE / 2 - 5 , -0.4f, -0.3f, 0.5f);
+	particles::fcAddVelocity(fluidCube, 2, SIZE / 2, SIZE / 2, 0.5f, 0.01f, 0.5f);
+	particles::fcAddVelocity(fluidCube, SIZE - 5, SIZE / 2 - 5, SIZE / 2 - 5 , -0.4f, -0.3f, 0.5f);
+}
+
+void addPuffs(FluidCube* fc) {
+	switch (prevPuff) {
+		case 0:
+			fcAddDensity(fc, 3, 3, 3, 10.f);
+			fcAddDensity(fc, 4, 3, 3, 10.f);
+			fcAddDensity(fc, 3, 3, 4, 10.f);
+			fcAddDensity(fc, 4, 3, 4, 10.f);
+
+			fcAddVelocity(fc, 3, 3, 3, 0.01f, 0.3f, 0.01f);
+			fcAddVelocity(fc, 4, 3, 4, 0.01f, 0.3f, 0.01f);
+			prevPuff = (int) currentTime % 4;
+			break;
+		case 1:
+			fcAddDensity(fc, SIZE - 3, 3, 3, 10.f);
+			fcAddDensity(fc, SIZE - 4, 3, 3, 10.f);
+			fcAddDensity(fc, SIZE - 3, 3, 4, 10.f);
+			fcAddDensity(fc, SIZE - 4, 3, 4, 10.f);
+
+			fcAddVelocity(fc, SIZE - 3, 3, 3, -0.01f, 0.3f, 0.01f);
+			fcAddVelocity(fc, SIZE - 4, 3, 4, -0.01f, 0.3f, 0.01f);
+			prevPuff = (int)currentTime % 4;
+			break;
+		case 2:
+			fcAddDensity(fc, SIZE - 3, 3, SIZE - 3, 10.f);
+			fcAddDensity(fc, SIZE - 4, 3, SIZE - 3, 10.f);
+			fcAddDensity(fc, SIZE - 3, 3, SIZE - 4, 10.f);
+			fcAddDensity(fc, SIZE - 4, 3, SIZE - 4, 10.f);
+
+			fcAddVelocity(fc, SIZE - 3, 3, SIZE - 3, -0.01f, 0.3f, -0.01f);
+			fcAddVelocity(fc, SIZE - 4, 3, SIZE - 4, -0.01f, 0.3f, -0.01f);
+			prevPuff = (int)currentTime % 4;
+			break;
+		case 3:
+			fcAddDensity(fc, 3, 3, SIZE - 3, 10.f);
+			fcAddDensity(fc, 4, 3, SIZE - 3, 10.f);
+			fcAddDensity(fc, 3, 3, SIZE - 4, 10.f);
+			fcAddDensity(fc, 4, 3, SIZE - 4, 10.f);
+
+			fcAddVelocity(fc, 3, 3, SIZE - 3, 0.01f, 0.3f, -0.01f);
+			fcAddVelocity(fc, 4, 3, SIZE - 4, 0.01f, 0.3f, -0.01f);
+			prevPuff = (int)currentTime % 4;
+			break;
+	}
+}
+
+void addWind(FluidCube* fc) {
+	if ((int)currentTime % 2) {
+		for (int x = 1; x < SIZE; x += 2) {
+			for (int y = 1; y < SIZE; y += 2) {
+				fcAddVelocity(fluidCube, x, y, 1, 0, deltaTime, -2.f);
+			}
+		}
+	}
+	else {
+		for (int x = 2; x < SIZE; x += 2) {
+			for (int y = 2; y < SIZE; y += 2) {
+				fcAddVelocity(fluidCube, x, y, 1, 0, -deltaTime, -1.f);
+			}
+		}
+	}
 }
 
 void rotateLight(float angle) {
@@ -215,17 +281,6 @@ void initialize()
 	//init simulation cube 
 	fluidCube = particles::fcCreate(SIZE, DIFFUSION, VISCOSITY, ABSORBTION, SCATTERING, dt);
 	
-	particles::fcAddVelocity(fluidCube, 1, 1, 1, -0.2f, 0.5f, 0.5f);
-	particles::fcAddVelocity(fluidCube, 2, 1, 1, 0.f, 0.5f, 0.5f);
-	particles::fcAddVelocity(fluidCube, 3, 1, 1, 0.2f, 0.5f, 0.5f);
-
-	//Add initial velocity
-	for (int z = 4; z < SIZE - 6 ; z += 4) {
-		particles::fcAddVelocity(fluidCube, SIZE / 2, z   , SIZE / 2, 1.f, 0.f, 0.f);
-		particles::fcAddVelocity(fluidCube, SIZE / 2, z+ 1, SIZE / 2, 0.f, 0.f, 1.f);
-		particles::fcAddVelocity(fluidCube, SIZE / 2, z+ 2, SIZE / 2, -1.f, 0.f, 0.f);
-		particles::fcAddVelocity(fluidCube, SIZE / 2, z+ 3, SIZE / 2, 0.f, 0.f, -1.f);
-	}
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -247,6 +302,9 @@ void display(void)
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	
 	if (emitSmoke) { emitter_driver(fluidCube); }
+	if (wind) { addWind(fluidCube); }
+	if (puffs) { addPuffs(fluidCube); }
+
 	draw_density(fluidCube, imageBuff, rayBuff);
 
 	glUseProgram(shaderProgram);
@@ -309,15 +367,10 @@ bool handleEvents(void)
 			//// More info at https://wiki.libsdl.org/SDL_MouseMotionEvent
 			int delta_x = event.motion.x - g_prevMouseCoords.x;
 			int delta_y = event.motion.y - g_prevMouseCoords.y;
-			//float rotationSpeed = 0.1f;
-			//mat4 yaw = rotate(rotationSpeed * deltaTime * -delta_x, worldUp);
-			//mat4 pitch = rotate(rotationSpeed * deltaTime * -delta_y,
-			//	normalize(cross(cameraDirection, worldUp)));
-			//cameraDirection = vec3(pitch * yaw * vec4(cameraDirection, 0.0f));
+
 			g_prevMouseCoords.x = event.motion.x;
 			g_prevMouseCoords.y = event.motion.y;
-			int x_view = g_prevMouseCoords.x;
-			int y_view = (640 - g_prevMouseCoords.y);
+			
 			camAngle -= delta_x / 150.f;
 			camMoved = 1;
 		}
@@ -325,21 +378,34 @@ bool handleEvents(void)
 		if (event.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_RIGHT
 			&& (!labhelper::isGUIvisible() || !ImGui::GetIO().WantCaptureMouse))
 		{
-			g_isMouseDragging = true;
+			g_isRightMouseDragging = true;
 			int x;
 			int y;
 			SDL_GetMouseState(&x, &y);
 			g_prevMouseCoords.x = x;
 			g_prevMouseCoords.y = y;
-			//printf("Click (%d, %d)\n", x, 640 - y);
 			
-			fcAddVelocity(fluidCube, SIZE / 2, SIZE / 2 + 1 ,SIZE / 2, 0, 10.f, 0.f);
-			fcAddVelocity(fluidCube, SIZE / 2, SIZE / 2 - 1, SIZE / 2, 0.f, -10.f, 0.f);
-			fcAddVelocity(fluidCube, SIZE / 2 + 1, SIZE / 2, SIZE / 2, 10.f, 0.f, 0.f);
-			fcAddVelocity(fluidCube, SIZE / 2 - 1, SIZE / 2, SIZE / 2, -10.f, 0.f, 0.f);
-			fcAddVelocity(fluidCube, SIZE / 2, SIZE / 2, SIZE / 2 + 1, 0.f, 0.f, 10.f);
-			fcAddVelocity(fluidCube, SIZE / 2, SIZE / 2, SIZE / 2 - 1, 0.f, 0.f, -5.f);
+		}
 
+		if (!(SDL_GetMouseState(NULL, NULL) & SDL_BUTTON(SDL_BUTTON_RIGHT)))
+		{
+			g_isRightMouseDragging = false;
+		}
+
+		
+		if (event.type == SDL_MOUSEMOTION && g_isRightMouseDragging)
+		{
+			//// More info at https://wiki.libsdl.org/SDL_MouseMotionEvent
+			int delta_x = event.motion.x - g_prevMouseCoords.x;
+			int delta_y = event.motion.y - g_prevMouseCoords.y;
+
+			g_prevMouseCoords.x = event.motion.x;
+			g_prevMouseCoords.y = event.motion.y;
+			
+			//float x_vel = delta_x / 640; //Window size
+			//float y_vel = delta_y / 640; 
+			//vec3 velocity = 5.f * normalize(cam.viewMatrix * vec4(delta_x, delta_y, 0, 1));
+			//fcAddVelocity(fluidCube, SIZE / 2, SIZE / 2, SIZE / 2, velocity.x, velocity.y, velocity.z);
 		}
 
 	}
@@ -360,17 +426,22 @@ void gui()
 	if (ImGui::Button("Clear smoke")) {
 		fcClearDensity(fluidCube);
 	}
+	ImGui::SameLine();
 	ImGui::Checkbox("Smoke Emitter", &emitSmoke);
-	if (ImGui::SliderFloat("Camera Distance", &camDistance, 20, 80)) {
-		camMoved = 1;
-	}
+	ImGui::SameLine();
+	ImGui::Checkbox("Add puffs", &puffs);
+	ImGui::SameLine();
+	ImGui::Checkbox("Add Wind", &wind);
 	if (ImGui::SliderFloat("Rotate Light", &light_x, -3.14f, 3.14f)) {
 		rotateLight(light_x);
 	}
+	ImGui::SliderFloat("Emitter dir x ", &emitterDir.x, -0.3f, 0.3f);
+	ImGui::SliderFloat("Emitter dir y ", &emitterDir.y, -0.3f, 0.3f);
 	ImGui::SliderInt("Emitter x pos", &emitterPos.x, 1, SIZE - 1);
 	ImGui::SliderInt("Emitter y pos", &emitterPos.y, 1, SIZE - 1);
-	ImGui::SliderFloat("Emitter dir x ", &emitterDir.x, -1.f, 1.f);
-	ImGui::SliderFloat("Emitter dir y ", &emitterDir.y, -1.f, 1.f);
+	if (ImGui::SliderFloat("Camera Distance", &camDistance, 20, 80)) {
+		camMoved = 1;
+	}
 	////////////////////////////////////////////////////////////////////////////////
 	////////////////////////////////////////////////////////////////////////////////
 

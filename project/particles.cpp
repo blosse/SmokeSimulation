@@ -25,7 +25,7 @@ namespace particles {
 	{
 		FluidCube* cube = (FluidCube*) malloc(sizeof(*cube));
 
-		int n = size * size * size;//(size + 2) * (size + 2); TODO Fixa minnesproblemet
+		int n = size * size * size;
 
 		cube->size = size;
 		cube->dt = dt;
@@ -39,11 +39,11 @@ namespace particles {
 
 		cube->Vx = (float*) calloc(n, sizeof(float));
 		cube->Vy = (float*) calloc(n, sizeof(float));
-		cube->Vz = (float*) calloc(size * size * size, sizeof(float));
+		cube->Vz = (float*) calloc(n, sizeof(float));
 
 		cube->Vx0 = (float*) calloc(n, sizeof(float));
 		cube->Vy0 = (float*) calloc(n, sizeof(float));
-		cube->Vz0 = (float*) calloc(size * size * size, sizeof(float));
+		cube->Vz0 = (float*) calloc(n, sizeof(float));
 
 		cube->position = vec3(0, 0, 0);
 		cube->minBound = fvec3(cube->position.x - size / 2, cube->position.y - size / 2, cube->position.z - size / 2);
@@ -70,19 +70,23 @@ namespace particles {
 
 	//"horizontal component of the velocity should be zero on the vertical walls, while the vertical component of
 	//the velocity should be zero on the horizontal walls"
+	//i.e negate the incoming vector component for each respective plane
 	void set_bnd(int b, float* x, int N) {
+		//Set values on z-planes
 		for (int j = 1; j < N - 1; j++) {
 			for (int i = 1; i < N - 1; i++) {
 				x[XYZ(i, j, 0)] = b == 3 ? -x[XYZ(i, j, 1)] : x[XYZ(i, j, 1)];
 				x[XYZ(i, j, N - 1)] = b == 3 ? -x[XYZ(i, j, N - 2)] : x[XYZ(i, j, N - 2)];
 			}
 		}
+		//Set values on y-planes
 		for (int k = 1; k < N - 1; k++) {
 			for (int i = 1; i < N - 1; i++) {
 				x[XYZ(i, 0, k)] = b == 2 ? -x[XYZ(i, 1, k)] : x[XYZ(i, 1, k)];
 				x[XYZ(i, N - 1, k)] = b == 2 ? -x[XYZ(i, N - 2, k)] : x[XYZ(i, N - 2, k)];
 			}
 		}
+		//Set values on x-planes
 		for (int k = 1; k < N - 1; k++) {
 			for (int j = 1; j < N - 1; j++) {
 				x[XYZ(0, j, k)] = b == 1 ? -x[XYZ(1, j, k)] : x[XYZ(1, j, k)];
@@ -90,6 +94,7 @@ namespace particles {
 			}
 		}
 
+		//Set corners to average of neighboring cells
 		x[XYZ(0, 0, 0)] = 0.33f * (x[XYZ(1, 0, 0)] + x[XYZ(0, 1, 0)] + x[XYZ(0, 0, 1)]);
 		x[XYZ(0, N - 1, 0)] = 0.33f * (x[XYZ(1, N - 1, 0)] + x[XYZ(0, N - 2, 0)] + x[XYZ(0, N - 1, 1)]);
 		x[XYZ(0, 0, N - 1)] = 0.33f * (x[XYZ(1, 0, N - 1)] + x[XYZ(0, 1, N - 1)] + x[XYZ(0, 0, N-2)]);
@@ -100,11 +105,9 @@ namespace particles {
 		x[XYZ(N - 1, N - 1, N - 1)] = 0.33f * (x[XYZ(N - 2, N - 1, N - 1)] + x[XYZ(N - 1, N - 2, N - 1)] + x[XYZ(N - 1, N - 1, N - 2)]);
 	}
 
-	void fcAddDensity(FluidCube* cube, int x, int y, int z,float amount) { //Take force input from mouse or something "outside force"
+	void fcAddDensity(FluidCube* cube, int x, int y, int z,float amount) {
 		int N = cube->size;
 		cube->density[XYZ(x, y, z)] += amount;
-		//float dens = cube->density[XYZ(x, y, z)];
-		//printf("Added density at (%d,%d): %f\n", x, y, dens);
 	}
 
 	void fcAddVelocity(FluidCube* cube, int x, int y, int z, float amountX, float amountY, float amountZ)
@@ -124,22 +127,25 @@ namespace particles {
 	}
 
 
-	//Exchange densities with neighboring cells. The smoke "leaks" into the neighboring cells
-	void lin_solve(int b, float* x, float* x0, float a, float c, int iter, int N) {
-		float invc = 1.0 / c;
+	//Gauss-Seidel iterative solver
+	//Calc inverse of a matrix
+	//Do this since "We want to find the densities which when diffused 
+	//backward in time yield the densities we started with"
+	void lin_solve(int b, float* x, float* x0, float diffusion_rate, float a, int iter, int N) {
+		float inv_a = 1.0 / a;
 		for (int k = 0; k < iter; k++) {
 			for (int m = 1; m < N - 1; m++) {
 				for (int j = 1; j < N - 1; j++) {
 					for (int i = 1; i < N - 1; i++) {
 						x[XYZ(i, j, m)] =
 							(x0[XYZ(i, j, m)]
-								+ a *(x[XYZ(i + 1, j, m)]
+								+ diffusion_rate *(x[XYZ(i + 1, j, m)]
 									+ x[XYZ(i - 1, j, m)]
 									+ x[XYZ(i, j + 1, m)]
 									+ x[XYZ(i, j - 1, m)]
 									+ x[XYZ(i, j, m + 1)]
 									+ x[XYZ(i, j, m - 1)])
-									) * invc;
+									) * inv_a;
 					}
 				}
 			}
@@ -147,48 +153,38 @@ namespace particles {
 		}
 	}
 
+	//Diffuse using the gauss-seidel solver
 	void diffuse(int b, float* x, float* x0, float diff, float dt, int iter, int N) {
 		float a = dt * diff * (N - 2) * (N - 2);
 		lin_solve(b, x, x0, a, 1 + 6 * a, iter, N); //This 4 should maybe be a 6 in 3D
 	}
 
-	//This badboy is from the paper, mike ash impl is somewhat different due to XYZz
 	//This function looks at the velocity in each cell and traces it back it time and sees where it lands.
 	//It then performes a weighted average of the cells around the spot and applies that value to the current cell.
 	void advect(int b, float* d, float* d0, float* u, float* v, float* w, float dt, int N) {
 		float i0, i1, j0, j1, k0, k1;
-
-		float dtx = dt * (N - 2);
-		float dty = dt * (N - 2);
-		float dtz = dt * (N - 2);
-
 		float s0, s1, t0, t1, u0, u1;
-		float tmp1, tmp2, tmp3, x, y, z;
+		float x, y, z;
 
-		float Nfloat = (float) N;
-		float ifloat, jfloat, kfloat;
-		int i, j, k;
+		float dt0 = dt * (N - 2);
 
-		for (k = 1, kfloat = 1; k < N - 1; k++, kfloat++) {
-			for (j = 1, jfloat = 1; j < N - 1; j++, jfloat++) {
-				for (i = 1, ifloat = 1; i < N - 1; i++, ifloat++) {
-					tmp1 = dtx * u[XYZ(i, j, k)];
-					tmp2 = dty * v[XYZ(i, j, k)];
-					tmp3 = dtz * w[XYZ(i, j, k)];
-					x = ifloat - tmp1;
-					y = jfloat - tmp2;
-					z = kfloat - tmp3;
+		for (int k = 1; k < N - 1; k++) {
+			for (int j = 1; j < N - 1; j++) {
+				for (int i = 1; i < N - 1; i++) {
+					x = i - (dt0 * u[XYZ(i, j, k)]);
+					y = j - (dt0 * v[XYZ(i, j, k)]);
+					z = k - (dt0 * w[XYZ(i, j, k)]);
 
 					if (x < 0.5f) x = 0.5f;
-					if (x > Nfloat + 0.5f) x = Nfloat + 0.5f;
+					if (x > N + 0.5f) x = N + 0.5f;
 					i0 = floor(x);
 					i1 = i0 + 1.0f;
 					if (y < 0.5f) y = 0.5f;
-					if (y > Nfloat + 0.5f) y = Nfloat + 0.5f;
+					if (y > N + 0.5f) y = N + 0.5f;
 					j0 = floor(y);
 					j1 = j0 + 1.0f;
 					if (z < 0.5f) z = 0.5f;
-					if (z > Nfloat + 0.5f) z = Nfloat + 0.5f;
+					if (z > N + 0.5f) z = N + 0.5f;
 					k0 = floor(z);
 					k1 = k0 + 1.0f;
 
@@ -199,18 +195,11 @@ namespace particles {
 					u1 = z - k0;
 					u0 = 1.0f - u1;
 
-					int i0i = (int) i0;
-					int i1i = (int) i1;
-					int j0i = (int) j0;
-					int j1i = (int) j1;
-					int k0i = (int) k0;
-					int k1i = (int) k1;
-
 					d[XYZ(i, j, k)] = 
-						s0 * (t0 * (u0 * d0[XYZ(i0i, j0i, k0i)] + u1 * d0[XYZ(i0i, j0i, k1i)])
-							+(t1 * (u0 * d0[XYZ(i0i, j1i, k0i)] + u1 * d0[XYZ(i0i, j1i, k1i)])))
-					  + s1 * (t0 * (u0 * d0[XYZ(i1i, j0i, k0i)] + u1 * d0[XYZ(i1i, j0i, k1i)])
-							+(t1 * (u0 * d0[XYZ(i1i, j1i, k0i)] + u1 * d0[XYZ(i1i, j1i, k1i)])));
+						 s0 * (t0 * (u0 * d0[XYZ((int) i0, (int) j0, (int) k0)] + u1 * d0[XYZ((int) i0, (int) j0, (int) k1)])
+							+ (t1 * (u0 * d0[XYZ((int) i0, (int) j1, (int) k0)] + u1 * d0[XYZ((int) i0, (int) j1, (int) k1)])))
+						+s1 * (t0 * (u0 * d0[XYZ((int) i1, (int) j0, (int) k0)] + u1 * d0[XYZ((int) i1, (int) j0, (int) k1)])
+							+ (t1 * (u0 * d0[XYZ((int) i1, (int) j1, (int) k0)] + u1 * d0[XYZ((int) i1, (int) j1, (int) k1)])));
 				}
 			}
 		}
@@ -218,9 +207,8 @@ namespace particles {
 	}
 
 	//Poisson equation, using Gauss-Seidel relaxation again to solve system of equations.
-	//This implementation is from the original paper,
 	void project(float* u, float* v, float* w, float* p, float* div, int iter, int N) {
-		float invN = (float) 1 / N;
+		float invN =  1.f / N;
 		for (int k = 1; k < N - 1; k++) {
 			for (int j = 1; j < N - 1; j++) {
 				for (int i = 1; i < N - 1; i++) {
