@@ -48,6 +48,4 @@ namespace particles {
 	void diffuse(int b, float* x, float* x0, float diff, float dt, int iter, int N);
 	void advect(int b, float* d, float* d0, float* u, float* v, float* velocZ, float dt, int N);
 	void project(float* u, float* v, float* velocZ, float* p, float* div, int iter, int N);
-	//void dens_step(int N, float* x, float* x0, float* u, float* v, float diff, float dt);
-	//void vel_step(int N, float* u, float* v, float* u0, float* v0, float visc, float dt); //Packs all helper functions into one
 }

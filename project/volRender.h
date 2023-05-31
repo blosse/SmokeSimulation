@@ -100,26 +100,25 @@ class ray {
 	//Geometric intersection test of ray and sphere
 	vec2 raySphereIntersect(sphere sph) {
 		vec3 L = sph.position - this->origin; //Vector from center of sphere to ray origin
-		float t_proj = dot(L, this->dir); //
+		float t_proj = dot(L, this->dir); //"Hypotenusan"
 		if (t_proj < 0) { 
 			return vec2(-1, -1); //Sphere is behind ray origin
 		} 
-		float d2 = dot(L, L) - (t_proj * t_proj);
+		float d2 = dot(L, L) - (t_proj * t_proj); //Pythagoras
 		if (d2 > sph.radius) { 
-			return vec2(-1, -1); 
+			return vec2(-1, -1); //Ray misses
 		}
-		float t_halfcircle = sqrt(sph.radius2 - d2);
-		return vec2(t_proj - t_halfcircle, t_proj + t_halfcircle);
+		float t_halfcircle = sqrt(sph.radius2 - d2); //Pythagoras again
+		return vec2(t_proj - t_halfcircle, t_proj + t_halfcircle); //Return points of intersection
 	}
 
-	//Generate jitter [-0.1, 0.1]
+	//Generate jitter [-0.2, 0.2]
 	float jitter() {
 		return ((rand() / RAND_MAX) * 0.4f) - 0.2f;
 	}
 
 	vec3 traceRay(FluidCube* fc, vec3* imgBuf, sphere lightPos) {
-		vec3 bg_color = { 0.1f, 0.1f, 0.15f };
-		//float phase = 1 / 4 * 3.141; //Basic phase term for isotropic scattering, might implement henyey-greenstein if time
+		vec3 bg_color = { 0.15f, 0.15f, 0.18f };
 		int N = fc->size;
 
 		//If ray hits light source, set bg color to color of light
@@ -191,21 +190,16 @@ class ray {
 
 
 void renderVolume(vec3* renderBuffer, std::vector<ray> *rayBuffer, FluidCube* fc, sphere lightPos, camera cam, int img_width, int img_height, int cameraMoved) {
-	int fov = 90;
-	float aspectRatio =(float) (img_width / img_height);
-	int N = img_height;
 	
 	mat4 viewMatrix = cam.viewMatrix;
 	mat4 inverseView = inverse(viewMatrix);
 
-	float scale = tan(radians(fov * 0.5)); //?
-	
 	if (cameraMoved) {
 		rayBuffer->clear();
 		for (int y = 0; y < img_height; y++) {
 			for (int x = 0; x < img_width; x++) {
-				float px = ((2 * ((x + 0.5) / img_width)) - 1) * aspectRatio * scale;
-				float py = ((2 * ((y + 0.5) / img_height)) - 1) * scale;
+				float px = ((2 * ((x + 0.5) / img_width)) - 1);
+				float py = ((2 * ((y + 0.5) / img_height)) - 1);
 
 				vec3 rayOrigin = cam.position;
 				vec3 rayTargetWorld = inverseView * vec4(px, py, -1, 1);

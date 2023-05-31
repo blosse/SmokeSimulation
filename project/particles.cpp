@@ -27,6 +27,7 @@ namespace particles {
 
 		int n = size * size * size;
 
+		//Properties of the smoke and simulation
 		cube->size = size;
 		cube->dt = dt;
 		cube->diff = diffusion;
@@ -34,17 +35,23 @@ namespace particles {
 		cube->absorbtion = absorbtion;
 		cube->scattering = scattering;
 
+		//Used in final diffuse and advect step to "clear" the buffers
 		cube->s	= (float*) calloc(n, sizeof(float));
+
+		//Stores the smoke density of each voxel
 		cube->density = (float*)calloc(n, sizeof(float));
 
+		//Current velocity
 		cube->Vx = (float*) calloc(n, sizeof(float));
 		cube->Vy = (float*) calloc(n, sizeof(float));
 		cube->Vz = (float*) calloc(n, sizeof(float));
 
+		//Previous velocity
 		cube->Vx0 = (float*) calloc(n, sizeof(float));
 		cube->Vy0 = (float*) calloc(n, sizeof(float));
 		cube->Vz0 = (float*) calloc(n, sizeof(float));
 
+		//Position and AABB of the field
 		cube->position = vec3(0, 0, 0);
 		cube->minBound = fvec3(cube->position.x - size / 2, cube->position.y - size / 2, cube->position.z - size / 2);
 		cube->maxBound = fvec3(cube->position.x + size / 2, cube->position.y + size / 2, cube->position.z + size / 2);
@@ -131,8 +138,8 @@ namespace particles {
 	//Calc inverse of a matrix
 	//Do this since "We want to find the densities which when diffused 
 	//backward in time yield the densities we started with"
-	void lin_solve(int b, float* x, float* x0, float diffusion_rate, float a, int iter, int N) {
-		float inv_a = 1.0 / a;
+	void lin_solve(int b, float* x, float* x0, float diffusion_rate, float diff_const, int iter, int N) {
+		float inv_diff = 1.0 / diff_const; //1 + 6 * diffusion_rate
 		for (int k = 0; k < iter; k++) {
 			for (int m = 1; m < N - 1; m++) {
 				for (int j = 1; j < N - 1; j++) {
@@ -145,7 +152,7 @@ namespace particles {
 									+ x[XYZ(i, j - 1, m)]
 									+ x[XYZ(i, j, m + 1)]
 									+ x[XYZ(i, j, m - 1)])
-									) * inv_a;
+									) * inv_diff;
 					}
 				}
 			}
@@ -155,12 +162,12 @@ namespace particles {
 
 	//Diffuse using the gauss-seidel solver
 	void diffuse(int b, float* x, float* x0, float diff, float dt, int iter, int N) {
-		float a = dt * diff * (N - 2) * (N - 2);
-		lin_solve(b, x, x0, a, 1 + 6 * a, iter, N); //This 4 should maybe be a 6 in 3D
+		float diffusion_rate = dt * diff * (N - 2) * (N - 2);
+		lin_solve(b, x, x0, diffusion_rate, 1 + 6 * diffusion_rate, iter, N); //This 4 should maybe be a 6 in 3D
 	}
 
-	//This function looks at the velocity in each cell and traces it back it time and sees where it lands.
-	//It then performes a weighted average of the cells around the spot and applies that value to the current cell.
+	//This function looks at a particle in each voxel and traces it back it time and sees where it lands.
+	//It then performes a weighted average of the voxels around the spot and applies that value to the current voxel.
 	void advect(int b, float* d, float* d0, float* u, float* v, float* w, float dt, int N) {
 		float i0, i1, j0, j1, k0, k1;
 		float s0, s1, t0, t1, u0, u1;
@@ -171,10 +178,12 @@ namespace particles {
 		for (int k = 1; k < N - 1; k++) {
 			for (int j = 1; j < N - 1; j++) {
 				for (int i = 1; i < N - 1; i++) {
+					//Figure out where particle came from
 					x = i - (dt0 * u[XYZ(i, j, k)]);
 					y = j - (dt0 * v[XYZ(i, j, k)]);
 					z = k - (dt0 * w[XYZ(i, j, k)]);
 
+					//Check so that the particle did not end up outside the field
 					if (x < 0.5f) x = 0.5f;
 					if (x > N + 0.5f) x = N + 0.5f;
 					i0 = floor(x);
@@ -188,6 +197,7 @@ namespace particles {
 					k0 = floor(z);
 					k1 = k0 + 1.0f;
 
+					//Calc the distance a particle as moved
 					s1 = x - i0;
 					s0 = 1.0f - s1;
 					t1 = y - j0;
@@ -195,6 +205,7 @@ namespace particles {
 					u1 = z - k0;
 					u0 = 1.0f - u1;
 
+					//Average togheter the densities around the voxel which the "particle" came from, and store in the current voxel
 					d[XYZ(i, j, k)] = 
 						 s0 * (t0 * (u0 * d0[XYZ((int) i0, (int) j0, (int) k0)] + u1 * d0[XYZ((int) i0, (int) j0, (int) k1)])
 							+ (t1 * (u0 * d0[XYZ((int) i0, (int) j1, (int) k0)] + u1 * d0[XYZ((int) i0, (int) j1, (int) k1)])))
@@ -206,14 +217,17 @@ namespace particles {
 		set_bnd(b, d, N);
 	}
 
-	//Poisson equation, using Gauss-Seidel relaxation again to solve system of equations.
+	//This step makes sure that the "mass is conserved" i.e makes sure there is equal inflow and outflow in every voxel.
+	//Builds on the fact that every velocity field can be described as the sum of a mass conserving field and gradient field
+	//We get our incompressible field by subtracting the gradient from our current velocities
 	void project(float* u, float* v, float* w, float* p, float* div, int iter, int N) {
+		//Set up "matricies" to calc the gradient
 		float invN =  1.f / N;
 		for (int k = 1; k < N - 1; k++) {
 			for (int j = 1; j < N - 1; j++) {
 				for (int i = 1; i < N - 1; i++) {
 					div[XYZ(i, j, k)] = -0.5f * (
-						u[XYZ(i + 1, j, k)]
+						  u[XYZ(i + 1, j, k)]
 						- u[XYZ(i - 1, j, k)]
 						+ v[XYZ(i, j + 1, k)]
 						- v[XYZ(i, j - 1, k)]
@@ -226,16 +240,21 @@ namespace particles {
 		}
 		set_bnd(0, div, N);
 		set_bnd(0, p, N);
+		//Reuse the gauss-seidel solver to solve the equations and get the gradient field
 		lin_solve(0, p, div, 1, 6, iter, N);
 
+		//Subtract gradient from out velocity field
 		for (int k = 1; k < N - 1; k++) {
 			for (int j = 1; j < N - 1; j++) {
 				for (int i = 1; i < N - 1; i++) {
-					u[XYZ(i, j, k)] -= 0.5f * (p[XYZ(i + 1, j, k)]
+					u[XYZ(i, j, k)] -= 0.5f * (
+						  p[XYZ(i + 1, j, k)]
 						- p[XYZ(i - 1, j, k)]) * N;
-					v[XYZ(i, j, k)] -= 0.5f * (p[XYZ(i, j + 1, k)]
+					v[XYZ(i, j, k)] -= 0.5f * (
+						  p[XYZ(i, j + 1, k)]
 						- p[XYZ(i, j - 1, k)]) * N;
-					w[XYZ(i, j, k)] -= 0.5f * (p[XYZ(i, j, k + 1)]
+					w[XYZ(i, j, k)] -= 0.5f * (
+						  p[XYZ(i, j, k + 1)]
 						- p[XYZ(i, j, k - 1)]) * N;
 				}
 			}
@@ -261,18 +280,23 @@ namespace particles {
 		float* s = cube->s;
 		float* density = cube->density;
 
+		//Diffuse the velocities
 		diffuse(1, Vx0, Vx, visc, dt, 4, N); //Default is 4 iterations
 		diffuse(2, Vy0, Vy, visc, dt, 4, N);
 		diffuse(3, Vz0, Vz, visc, dt, 4, N);
 
+		//Keep them mass conserving
 		project(Vx0, Vy0, Vz0, Vx, Vy, 4, N);
 
+		//Advect velocities
 		advect(1, Vx, Vx0, Vx0, Vy0, Vz0, dt, N);
 		advect(2, Vy, Vy0, Vx0, Vy0, Vz0, dt, N);
 		advect(3, Vz, Vz0, Vx0, Vy0, Vz0, dt, N);
 
+		//Keep them mass conserving
 		project(Vx, Vy, Vz, Vx0, Vy0, 4, N);
 
+		//Finaly diffuse and advect the actual smoke densities
 		diffuse(0, s, density, diff, dt, 4, N);
 		advect(0, density, s, Vx, Vy, Vz, dt, N);
 	}

@@ -138,10 +138,6 @@ void emitter_driver(particles::FluidCube* cube) {
 	particles::fcAddVelocity(cube, emitterPos.x + 1, emitterPos.y, emitterPos.z, emitterDir.x, emitterDir.y + 0.1f, emitterDir.z);
 	particles::fcAddVelocity(cube, emitterPos.x, emitterPos.y + 1, emitterPos.z, emitterDir.x-0.1f, emitterDir.y, emitterDir.z);
 	particles::fcAddVelocity(cube, emitterPos.x + 1, emitterPos.y + 1, emitterPos.z, emitterDir.x, emitterDir.y - 0.1f, emitterDir.z);
-
-	
-	particles::fcAddVelocity(fluidCube, 2, SIZE / 2, SIZE / 2, 0.5f, 0.01f, 0.5f);
-	particles::fcAddVelocity(fluidCube, SIZE - 5, SIZE / 2 - 5, SIZE / 2 - 5 , -0.4f, -0.3f, 0.5f);
 }
 
 void addPuffs(FluidCube* fc) {
@@ -212,8 +208,8 @@ void rotateLight(float angle) {
 	light.position = vec3(x, 5, z);
 }
 
-static void draw_density(particles::FluidCube* fc, vec3* imgBuf, std::vector<ray> *rayBuf)
-{	
+static void draw_density(particles::FluidCube* fc, vec3* imgBuf, std::vector<ray>* rayBuf)
+{
 	if (camMoved) {
 		cam.move(camAngle, camDistance);
 	}
@@ -306,6 +302,8 @@ void display(void)
 	if (puffs) { addPuffs(fluidCube); }
 
 	draw_density(fluidCube, imageBuff, rayBuff);
+
+
 
 	glUseProgram(shaderProgram);
 
